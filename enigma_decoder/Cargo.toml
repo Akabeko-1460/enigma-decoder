@@ -1,0 +1,13 @@
+[package]
+name = "enigma_decoder"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "enigma_decoder"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+rayon = "1.8"
+rand = "0.8"

@@ -13,6 +13,12 @@ Phase 2: 各候補について山登り法でプラグボードを推定。ス�
 import time
 from itertools import permutations, product
 
+try:
+    import enigma_decoder
+    HAS_RUST = True
+except ImportError:
+    HAS_RUST = False
+
 from enigma import (ROTORS, REFLECTORS, decrypt_with_settings,
                     precompute_rotor_arrays, decrypt_fast)
 from scoring import (index_of_coincidence, english_model, romaji_model,
@@ -43,6 +49,59 @@ def apply_plugboard_swap(pb, a, b):
         pb[b] = a
 
 
+def phase1_rust(ciphertext, reflector='B', top_n=200, sample_len=100,
+                rotor_choices=('I', 'II', 'III', 'IV', 'V'),
+                language='auto', verbose=True):
+    ct_ints = text_to_ints(ciphertext)[:sample_len]
+    en = english_model()
+    ja = romaji_model()
+    
+    use_en = language in ('auto', 'english')
+    use_ja = language in ('auto', 'romaji')
+
+    rotor_names = ['I', 'II', 'III', 'IV', 'V']
+    rotor_idx = {name: i for i, name in enumerate(rotor_names)}
+    
+    perms = list(permutations(rotor_choices, 3))
+    rust_perms = [[rotor_idx[r] for r in p] for p in perms]
+    
+    refl_idx = 0 if reflector == 'B' else 1
+    
+    t0 = time.time()
+    if verbose:
+        print(f'[Phase 1] {len(perms)} rotor perms × 17576 positions (lang={language}, sample={sample_len})')
+    
+    raw_results = []
+    chunk_size = max(1, len(rust_perms) // 10)
+    for i in range(0, len(rust_perms), chunk_size):
+        chunk = rust_perms[i:i+chunk_size]
+        res = enigma_decoder.phase1(
+            ct_ints, chunk, refl_idx, use_en, use_ja,
+            en.tri_array, en.tri_floor, en.quad_array, en.quad_floor,
+            ja.tri_array, ja.tri_floor, ja.quad_array, ja.quad_floor, top_n
+        )
+        raw_results.extend(res)
+        if verbose:
+            done = min(len(rust_perms), i + chunk_size)
+            pct = 100.0 * done / len(rust_perms)
+            print(f'  {pct:5.1f}%  ({done}/{len(rust_perms)} perms)')
+            
+    raw_results.sort(reverse=True, key=lambda x: x[0])
+    raw_results = raw_results[:top_n]
+    
+    results = []
+    for score, r_idx, p_idx in raw_results:
+        rotors = (rotor_names[r_idx[0]], rotor_names[r_idx[1]], rotor_names[r_idx[2]])
+        pos = (p_idx[0], p_idx[1], p_idx[2])
+        results.append((score, rotors, pos))
+        
+    if verbose:
+        print(f'[Phase 1] done in {time.time()-t0:.2f}s')
+        if results:
+            print(f'  top score: {results[0][0]:.2f} (rotors={results[0][1]} pos={results[0][2]})')
+            
+    return results
+
 def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
            rotor_choices=('I', 'II', 'III', 'IV', 'V'),
            language='auto', verbose=True):
@@ -55,6 +114,9 @@ def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
     language='romaji' → ローマ字のみ
     sample_len: Phase 1 で評価する文字数（少ないほど高速、多いほど精密）。
     """
+    if HAS_RUST:
+        return phase1_rust(ciphertext, reflector, top_n, sample_len, rotor_choices, language, verbose)
+
     ct_ints = text_to_ints(ciphertext)
     sample = ct_ints[:sample_len]
     pb_id = identity_plugboard()
@@ -295,6 +357,148 @@ def hill_climb_plugboard_multi(ct_ints, rotors, reflector, ring_settings,
     return best_pb, best_score
 
 
+def phase2_rust(ciphertext, candidates, language='auto', max_candidates=80,
+                top_results=5, accuracy=False, n_restarts=3, max_pairs=10,
+                tier2_n=300, verbose=True):
+    ct_ints = text_to_ints(ciphertext)
+    n = min(len(candidates), max_candidates)
+    
+    en = english_model()
+    ja = romaji_model()
+    use_en = language in ('auto', 'english')
+    use_ja = language in ('auto', 'romaji')
+    
+    rotor_names = ['I', 'II', 'III', 'IV', 'V']
+    rotor_idx = {name: i for i, name in enumerate(rotor_names)}
+    
+    t0 = time.time()
+    
+    if accuracy:
+        if verbose:
+            print(f'[Phase 2-1] fast screening on top {n} candidates (tier1, max_pairs=8)')
+        
+        rust_candidates = [
+            ([rotor_idx[r] for r in c[1]], list(c[2])) for c in candidates[:n]
+        ]
+        
+        raw_tier1 = []
+        chunk_size = max(1, len(rust_candidates) // 10)
+        for i in range(0, len(rust_candidates), chunk_size):
+            chunk = rust_candidates[i:i+chunk_size]
+            res = enigma_decoder.phase2_fast(
+                ct_ints, chunk, 0, use_en, use_ja,
+                en.tri_array, en.tri_floor, ja.tri_array, ja.tri_floor, 8
+            )
+            raw_tier1.extend(res)
+            if verbose:
+                done = min(len(rust_candidates), i + chunk_size)
+                pct = 100.0 * done / len(rust_candidates)
+                print(f'  tier1 {pct:5.1f}%  ({done}/{len(rust_candidates)} cands)')
+        
+        tier1_results = []
+        for s, r_idx, p_idx, pb in raw_tier1:
+            rotors = (rotor_names[r_idx[0]], rotor_names[r_idx[1]], rotor_names[r_idx[2]])
+            pos = (p_idx[0], p_idx[1], p_idx[2])
+            decrypted = decrypt_with_settings(ct_ints, rotors, 'B', (0,0,0), pos, pb)
+            text = ints_to_text(decrypted)
+            lang, final_score = best_language_score(text)
+            tier1_results.append((final_score, rotors, pos, (0,0,0), pb, lang, text))
+            
+        tier1_results.sort(reverse=True, key=lambda r: r[0])
+        seen_pos = set()
+        tier2_input = []
+        for r in tier1_results:
+            key = (r[1], r[2])
+            if key not in seen_pos:
+                seen_pos.add(key)
+                tier2_input.append(r)
+                if len(tier2_input) >= tier2_n:
+                    break
+                    
+        if verbose:
+            print(f'[Phase 2-1] done in {time.time()-t0:.1f}s')
+            
+        t2_start = time.time()
+        if verbose:
+            print(f'[Phase 2-2] full hill-climb with restarts on {len(tier2_input)} promising candidates')
+            
+        rust_tier2_candidates = [
+            ([rotor_idx[r] for r in c[1]], list(c[2])) for c in tier2_input
+        ]
+        
+        raw_tier2 = []
+        if rust_tier2_candidates:
+            chunk_size = max(1, len(rust_tier2_candidates) // 10)
+            for i in range(0, len(rust_tier2_candidates), chunk_size):
+                chunk = rust_tier2_candidates[i:i+chunk_size]
+                res = enigma_decoder.phase2_full(
+                    ct_ints, chunk, 0, use_en, use_ja,
+                    en.tri_array, en.tri_floor, ja.tri_array, ja.tri_floor, max_pairs, n_restarts
+                )
+                raw_tier2.extend(res)
+                if verbose:
+                    done = min(len(rust_tier2_candidates), i + chunk_size)
+                    pct = 100.0 * done / len(rust_tier2_candidates)
+                    print(f'  tier2 {pct:5.1f}%  ({done}/{len(rust_tier2_candidates)} cands)')
+        
+        all_results = []
+        for s, r_idx, p_idx, pb in raw_tier2:
+            rotors = (rotor_names[r_idx[0]], rotor_names[r_idx[1]], rotor_names[r_idx[2]])
+            pos = (p_idx[0], p_idx[1], p_idx[2])
+            decrypted = decrypt_with_settings(ct_ints, rotors, 'B', (0,0,0), pos, list(pb))
+            text = ints_to_text(decrypted)
+            lang, final_score = best_language_score(text)
+            all_results.append((final_score, rotors, pos, (0,0,0), list(pb), lang, text))
+            
+        if verbose:
+            print(f'[Phase 2-2] done in {time.time()-t2_start:.1f}s')
+            
+    else:
+        if verbose:
+            print(f'[Phase 2] hill-climbing plugboard for top {n} candidates (fast mode)')
+            
+        rust_candidates = [
+            ([rotor_idx[r] for r in c[1]], list(c[2])) for c in candidates[:n]
+        ]
+        
+        raw_results = []
+        if rust_candidates:
+            chunk_size = max(1, len(rust_candidates) // 10)
+            for i in range(0, len(rust_candidates), chunk_size):
+                chunk = rust_candidates[i:i+chunk_size]
+                res = enigma_decoder.phase2_fast(
+                    ct_ints, chunk, 0, use_en, use_ja,
+                    en.tri_array, en.tri_floor, ja.tri_array, ja.tri_floor, 8
+                )
+                raw_results.extend(res)
+                if verbose:
+                    done = min(len(rust_candidates), i + chunk_size)
+                    pct = 100.0 * done / len(rust_candidates)
+                    print(f'  {pct:5.1f}%  ({done}/{len(rust_candidates)} cands)')
+        
+        all_results = []
+        for s, r_idx, p_idx, pb in raw_results:
+            rotors = (rotor_names[r_idx[0]], rotor_names[r_idx[1]], rotor_names[r_idx[2]])
+            pos = (p_idx[0], p_idx[1], p_idx[2])
+            decrypted = decrypt_with_settings(ct_ints, rotors, 'B', (0,0,0), pos, list(pb))
+            text = ints_to_text(decrypted)
+            lang, final_score = best_language_score(text)
+            all_results.append((final_score, rotors, pos, (0,0,0), list(pb), lang, text))
+            
+        if verbose:
+            print(f'[Phase 2] done in {time.time()-t0:.1f}s')
+
+    all_results.sort(reverse=True, key=lambda r: r[0])
+    seen = set()
+    unique = []
+    for r in all_results:
+        if r[6] not in seen:
+            seen.add(r[6])
+            unique.append(r)
+            if len(unique) >= top_results:
+                break
+    return unique
+
 def phase2(ciphertext, candidates, language='auto', max_candidates=80,
            top_results=5, accuracy=False, n_restarts=3, max_pairs=10,
            tier2_n=300, verbose=True):
@@ -307,6 +511,9 @@ def phase2(ciphertext, candidates, language='auto', max_candidates=80,
         Tier 1: 高速山登りで max_candidates をふるい分け
         Tier 2: ふるい分け上位 tier2_n に完全山登り（既存ペア再配置）×複数開始点
     """
+    if HAS_RUST:
+        return phase2_rust(ciphertext, candidates, language, max_candidates, top_results, accuracy, n_restarts, max_pairs, tier2_n, verbose)
+
     ct_ints = text_to_ints(ciphertext)
     n = min(len(candidates), max_candidates)
 

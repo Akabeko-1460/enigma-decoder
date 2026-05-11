@@ -40,6 +40,28 @@ class LanguageModel:
         self.tri, self.tri_floor = build_ngram_logprobs(cleaned, 3)
         self.quad, self.quad_floor = build_ngram_logprobs(cleaned, 4)
 
+    @property
+    def tri_array(self):
+        if hasattr(self, '_tri_array'):
+            return self._tri_array
+        arr = [0.0] * (26**3)
+        for k, v in self.tri.items():
+            idx = (ord(k[0])-65)*676 + (ord(k[1])-65)*26 + (ord(k[2])-65)
+            arr[idx] = v
+        self._tri_array = arr
+        return arr
+
+    @property
+    def quad_array(self):
+        if hasattr(self, '_quad_array'):
+            return self._quad_array
+        arr = [0.0] * (26**4)
+        for k, v in self.quad.items():
+            idx = (ord(k[0])-65)*17576 + (ord(k[1])-65)*676 + (ord(k[2])-65)*26 + (ord(k[3])-65)
+            arr[idx] = v
+        self._quad_array = arr
+        return arr
+
     def _score_n(self, text, table, floor, n):
         if len(text) < n:
             return floor * max(1, len(text))
