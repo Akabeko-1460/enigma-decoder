@@ -44,12 +44,16 @@ def apply_plugboard_swap(pb, a, b):
 
 
 def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
-           rotor_choices=('I', 'II', 'III', 'IV', 'V'), verbose=True):
+           rotor_choices=('I', 'II', 'III', 'IV', 'V'),
+           language='auto', verbose=True):
     """
     Phase 1: ローター順 × 初期位置を全探索。
-    各設定でプラグボード無しの状態で復号し、両言語の trigram スコアの
-    最大値でランク付けする（IC は短文＆多ペアプラグボードでは不十分）。
-    sample_len 文字だけ復号して計算量を抑える。
+    各設定でプラグボード無しの状態で復号し、trigram スコアでランク付け。
+
+    language='auto'  → 両言語スコアの max を採用
+    language='english' → 英語のみ
+    language='romaji' → ローマ字のみ
+    sample_len: Phase 1 で評価する文字数（少ないほど高速、多いほど精密）。
     """
     ct_ints = text_to_ints(ciphertext)
     sample = ct_ints[:sample_len]
@@ -61,7 +65,7 @@ def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
     total = len(perms) * 26 ** 3
     if verbose:
         print(f'[Phase 1] {len(perms)} rotor perms × 17576 positions '
-              f'= {total} trials (trigram scoring)')
+              f'= {total} trials (lang={language}, sample={sample_len})')
 
     results = []
     t0 = time.time()
@@ -70,6 +74,11 @@ def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
 
     en_tri, en_floor = en.tri, en.tri_floor
     ja_tri, ja_floor = ja.tri, ja.tri_floor
+    en_quad, en_qfloor = en.quad, en.quad_floor
+    ja_quad, ja_qfloor = ja.quad, ja.quad_floor
+
+    use_en = language in ('auto', 'english')
+    use_ja = language in ('auto', 'romaji')
 
     for rotors in perms:
         fwd, bwd, notches, refl = precompute_rotor_arrays(rotors, reflector)
@@ -79,14 +88,24 @@ def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
                 (0, 0, 0), (p1, p2, p3), pb_id,
             )
             text = ''.join(chr(i + 65) for i in decrypted)
-            # 両言語のtrigramスコアの最大値
-            en_s = 0.0
-            ja_s = 0.0
-            for i in range(len(text) - 2):
-                tg = text[i:i+3]
-                en_s += en_tri.get(tg, en_floor)
-                ja_s += ja_tri.get(tg, ja_floor)
-            score = max(en_s, ja_s)
+            # trigram + quadgram の混合スコア
+            score = -float('inf')
+            if use_en:
+                s = 0.0
+                for i in range(len(text) - 2):
+                    s += en_tri.get(text[i:i+3], en_floor)
+                for i in range(len(text) - 3):
+                    s += en_quad.get(text[i:i+4], en_qfloor)
+                if s > score:
+                    score = s
+            if use_ja:
+                s = 0.0
+                for i in range(len(text) - 2):
+                    s += ja_tri.get(text[i:i+3], ja_floor)
+                for i in range(len(text) - 3):
+                    s += ja_quad.get(text[i:i+4], ja_qfloor)
+                if s > score:
+                    score = s
             results.append((score, rotors, (p1, p2, p3)))
             done += 1
             if verbose and done % progress_step == 0:
@@ -102,56 +121,6 @@ def phase1(ciphertext, reflector='B', top_n=200, sample_len=100,
         print(f'  top score: {results[0][0]:.2f} '
               f'(rotors={results[0][1]} pos={results[0][2]})')
     return results[:top_n]
-
-
-def hill_climb_plugboard(ct_ints, rotors, reflector, ring_settings,
-                         positions, scorer, max_pairs=10):
-    """
-    プラグボードの山登り法。
-    1ペアずつ追加し、追加後のスコアが最大になるペアを選ぶ。
-    既存ペアの解除も含めて全 (a,b) 組合せを毎回試す。
-    """
-    pb = identity_plugboard()
-
-    def decrypt_and_score(plugboard):
-        out = decrypt_with_settings(ct_ints, rotors, reflector,
-                                    ring_settings, positions, plugboard)
-        return scorer.score_raw(ints_to_text(out))
-
-    best_score = decrypt_and_score(pb)
-
-    for _ in range(max_pairs):
-        improved = False
-        best_pair = None
-        # 各 (a, b) ペアについてスコアを計算
-        for a in range(26):
-            for b in range(a + 1, 26):
-                # 一時的にスワップ
-                old_pa, old_pb = pb[a], pb[b]
-                apply_plugboard_swap(pb, a, b)
-                score = decrypt_and_score(pb)
-                # 元に戻す
-                pb[old_pa] = old_pa
-                pb[old_pb] = old_pb
-                pb[a] = a
-                pb[b] = b
-                if old_pa != a:
-                    pb[a] = old_pa
-                    pb[old_pa] = a
-                if old_pb != b:
-                    pb[b] = old_pb
-                    pb[old_pb] = b
-                # 改善ならメモ
-                if score > best_score:
-                    best_score = score
-                    best_pair = (a, b)
-                    improved = True
-        if not improved:
-            break
-        # 確定: best_pair をスワップ
-        apply_plugboard_swap(pb, *best_pair)
-
-    return pb, best_score
 
 
 def hill_climb_plugboard_fast(ct_ints, rotors, reflector, ring_settings,
@@ -200,16 +169,146 @@ def hill_climb_plugboard_fast(ct_ints, rotors, reflector, ring_settings,
     return pb, best_score
 
 
+def hill_climb_plugboard_full(ct_ints, rotors, reflector, ring_settings,
+                              positions, scorer, max_pairs=10,
+                              max_iterations=30, initial_pb=None):
+    """
+    完全な Gillogly 流山登り。各反復で 325 通りすべての (a, b) ペアを試し、
+    「a と b を組ませる（既存ペアは解除される）」 + 「既存ペアを解除する」の
+    全操作のうち最良を適用。局所最適への耐性が高い。
+
+    initial_pb: 開始時のプラグボード（None なら空）。ランダム再開用。
+    """
+    fwd, bwd, notches, refl = precompute_rotor_arrays(rotors, reflector)
+    if initial_pb is None:
+        pb = identity_plugboard()
+    else:
+        pb = list(initial_pb)
+
+    def decrypt_pb(plugboard):
+        out = decrypt_fast(ct_ints, fwd, bwd, notches, refl,
+                           ring_settings, positions, plugboard)
+        return scorer.score_raw(ints_to_text(out))
+
+    def count_pairs(plugboard):
+        return sum(1 for i in range(26) if plugboard[i] > i)
+
+    best_score = decrypt_pb(pb)
+
+    for _ in range(max_iterations):
+        best_op = None  # ('set', a, b) or ('remove', a, b)
+        best_new_score = best_score
+
+        # 操作1: a と b を組ませる（既存ペアは解除される）
+        for a in range(26):
+            for b in range(a + 1, 26):
+                if pb[a] == b:
+                    continue  # 既にこのペア
+                trial = pb.copy()
+                old_pa = trial[a]
+                old_pb = trial[b]
+                if old_pa != a:
+                    trial[old_pa] = old_pa
+                if old_pb != b:
+                    trial[old_pb] = old_pb
+                trial[a] = b
+                trial[b] = a
+                if count_pairs(trial) > max_pairs:
+                    continue
+                score = decrypt_pb(trial)
+                if score > best_new_score:
+                    best_new_score = score
+                    best_op = ('set', a, b)
+
+        # 操作2: 既存ペアを解除
+        for a in range(26):
+            if pb[a] > a:
+                trial = pb.copy()
+                trial[pb[a]] = pb[a]
+                trial[a] = a
+                score = decrypt_pb(trial)
+                if score > best_new_score:
+                    best_new_score = score
+                    best_op = ('remove', a, pb[a])
+
+        if best_op is None:
+            break
+
+        # 最良操作を適用
+        kind, a, b = best_op
+        if kind == 'set':
+            old_pa = pb[a]
+            old_pb = pb[b]
+            if old_pa != a:
+                pb[old_pa] = old_pa
+            if old_pb != b:
+                pb[old_pb] = old_pb
+            pb[a] = b
+            pb[b] = a
+        else:
+            pb[a] = a
+            pb[b] = b
+        best_score = best_new_score
+
+    return pb, best_score
+
+
+def hill_climb_plugboard_multi(ct_ints, rotors, reflector, ring_settings,
+                               positions, scorer, max_pairs=10,
+                               n_restarts=3, random_seed=None):
+    """
+    複数開始点からの山登り。空プラグボード + ランダム初期プラグボードで再開し、
+    最良を返す。局所最適からの脱出能力をさらに高める。
+    """
+    import random
+    if random_seed is not None:
+        random.seed(random_seed)
+
+    best_pb = None
+    best_score = -float('inf')
+
+    # 開始点1: 空プラグボード
+    pb, score = hill_climb_plugboard_full(
+        ct_ints, rotors, reflector, ring_settings, positions,
+        scorer, max_pairs=max_pairs)
+    if score > best_score:
+        best_score = score
+        best_pb = pb
+
+    # 開始点2..N: ランダム初期プラグボード（3〜5ペア）
+    for _ in range(n_restarts):
+        init_pb = identity_plugboard()
+        letters = list(range(26))
+        random.shuffle(letters)
+        n_init = random.randint(3, 5)
+        for k in range(n_init):
+            a, b = letters[2*k], letters[2*k+1]
+            init_pb[a] = b
+            init_pb[b] = a
+        pb, score = hill_climb_plugboard_full(
+            ct_ints, rotors, reflector, ring_settings, positions,
+            scorer, max_pairs=max_pairs, initial_pb=init_pb)
+        if score > best_score:
+            best_score = score
+            best_pb = pb
+
+    return best_pb, best_score
+
+
 def phase2(ciphertext, candidates, language='auto', max_candidates=80,
-           top_results=5, verbose=True):
+           top_results=5, accuracy=False, n_restarts=3, max_pairs=10,
+           tier2_n=300, verbose=True):
     """
     Phase 1 の上位候補それぞれに対してプラグボードを山登り。
     両言語のスコアラーで評価し、上位 top_results 個を返す。
+
+    accuracy=False: 高速山登り（追加のみ、開始点1つ）を全 max_candidates に適用。
+    accuracy=True:  二段階方式。
+        Tier 1: 高速山登りで max_candidates をふるい分け
+        Tier 2: ふるい分け上位 tier2_n に完全山登り（既存ペア再配置）×複数開始点
     """
     ct_ints = text_to_ints(ciphertext)
     n = min(len(candidates), max_candidates)
-    if verbose:
-        print(f'[Phase 2] hill-climbing plugboard for top {n} candidates')
 
     en = english_model()
     ja = romaji_model()
@@ -220,29 +319,107 @@ def phase2(ciphertext, candidates, language='auto', max_candidates=80,
     else:
         scorers = [en, ja]
 
-    all_results = []  # [(final_score, rotors, positions, rings, pb, lang, text), ...]
     t0 = time.time()
-    for idx, (ic, rotors, positions) in enumerate(candidates[:n]):
-        for scorer in scorers:
-            pb, _ = hill_climb_plugboard_fast(
-                ct_ints, rotors, 'B',
-                ring_settings=(0, 0, 0),
-                positions=positions,
-                scorer=scorer,
-                max_pairs=8,
-            )
-            decrypted = decrypt_with_settings(
-                ct_ints, rotors, 'B', (0, 0, 0), positions, pb)
-            text = ints_to_text(decrypted)
-            lang, score = best_language_score(text)
-            all_results.append((score, rotors, positions, (0, 0, 0), pb, lang, text))
-        if verbose and (idx + 1) % 10 == 0:
-            best_so_far = max(all_results, key=lambda r: r[0])
-            print(f'  {idx+1}/{n}  best so far: {best_so_far[0]:+.3f} '
-                  f'({best_so_far[5]})  elapsed {time.time()-t0:.0f}s')
 
-    if verbose:
-        print(f'[Phase 2] done in {time.time()-t0:.1f}s')
+    if accuracy:
+        # === Tier 1: 高速ふるい分け ===
+        if verbose:
+            print(f'[Phase 2-1] fast screening on top {n} candidates '
+                  f'(tier1, max_pairs=8)')
+        tier1_results = []
+        progress_step = max(1, n // 20)
+        for idx, (ic, rotors, positions) in enumerate(candidates[:n]):
+            for scorer in scorers:
+                pb, _ = hill_climb_plugboard_fast(
+                    ct_ints, rotors, 'B', (0, 0, 0), positions,
+                    scorer, max_pairs=8,
+                )
+                decrypted = decrypt_with_settings(
+                    ct_ints, rotors, 'B', (0, 0, 0), positions, pb)
+                text = ints_to_text(decrypted)
+                lang, score = best_language_score(text)
+                tier1_results.append(
+                    (score, rotors, positions, (0, 0, 0), pb, lang, text))
+            if verbose and (idx + 1) % progress_step == 0:
+                best_now = max(r[0] for r in tier1_results)
+                elapsed = time.time() - t0
+                eta = elapsed * (n - idx - 1) / max(1, idx + 1)
+                print(f'  tier1 {idx+1}/{n}  best so far: {best_now:+.3f}  '
+                      f'elapsed {elapsed:.0f}s  ETA {eta:.0f}s')
+        # 上位 tier2_n を Tier 2 へ
+        tier1_results.sort(reverse=True, key=lambda r: r[0])
+        # ローター+ポジションの組合せで重複除去
+        seen_pos = set()
+        tier2_input = []
+        for r in tier1_results:
+            key = (r[1], r[2])
+            if key not in seen_pos:
+                seen_pos.add(key)
+                tier2_input.append(r)
+                if len(tier2_input) >= tier2_n:
+                    break
+        if verbose:
+            t1 = time.time() - t0
+            print(f'[Phase 2-1] done in {t1:.0f}s, top tier1 score '
+                  f'{tier1_results[0][0]:+.3f}')
+
+        # === Tier 2: 完全山登り＋複数開始点 ===
+        if verbose:
+            print(f'[Phase 2-2] full hill-climb with restarts on '
+                  f'{len(tier2_input)} promising candidates '
+                  f'(max_pairs={max_pairs}, restarts={n_restarts})')
+        all_results = []
+        t2_start = time.time()
+        progress_step2 = max(1, len(tier2_input) // 20)
+        for idx, (s_tier1, rotors, positions, _, _, _, _) in enumerate(tier2_input):
+            for scorer in scorers:
+                pb, _ = hill_climb_plugboard_multi(
+                    ct_ints, rotors, 'B', (0, 0, 0), positions,
+                    scorer, max_pairs=max_pairs, n_restarts=n_restarts,
+                )
+                decrypted = decrypt_with_settings(
+                    ct_ints, rotors, 'B', (0, 0, 0), positions, pb)
+                text = ints_to_text(decrypted)
+                lang, score = best_language_score(text)
+                all_results.append(
+                    (score, rotors, positions, (0, 0, 0), pb, lang, text))
+            if verbose and (idx + 1) % progress_step2 == 0:
+                best_now = max(r[0] for r in all_results)
+                elapsed = time.time() - t2_start
+                eta = elapsed * (len(tier2_input) - idx - 1) / max(1, idx + 1)
+                print(f'  tier2 {idx+1}/{len(tier2_input)}  '
+                      f'best so far: {best_now:+.3f}  '
+                      f'elapsed {elapsed:.0f}s  ETA {eta:.0f}s')
+        if verbose:
+            print(f'[Phase 2-2] done in {time.time()-t2_start:.0f}s')
+
+    else:
+        # === 通常モード: シンプルな1段階 ===
+        if verbose:
+            print(f'[Phase 2] hill-climbing plugboard for top {n} candidates '
+                  f'(fast mode)')
+        all_results = []
+        progress_step = max(1, n // 20)
+        for idx, (ic, rotors, positions) in enumerate(candidates[:n]):
+            for scorer in scorers:
+                pb, _ = hill_climb_plugboard_fast(
+                    ct_ints, rotors, 'B', (0, 0, 0), positions,
+                    scorer, max_pairs=8,
+                )
+                decrypted = decrypt_with_settings(
+                    ct_ints, rotors, 'B', (0, 0, 0), positions, pb)
+                text = ints_to_text(decrypted)
+                lang, score = best_language_score(text)
+                all_results.append(
+                    (score, rotors, positions, (0, 0, 0), pb, lang, text))
+            if verbose and (idx + 1) % progress_step == 0:
+                best_now = max(r[0] for r in all_results)
+                elapsed = time.time() - t0
+                eta = elapsed * (n - idx - 1) / max(1, idx + 1)
+                print(f'  {idx+1}/{n}  best so far: {best_now:+.3f}  '
+                      f'elapsed {elapsed:.0f}s  ETA {eta:.0f}s')
+        if verbose:
+            print(f'[Phase 2] done in {time.time()-t0:.1f}s')
 
     all_results.sort(reverse=True, key=lambda r: r[0])
     # 重複除去（同じ復号文は1つだけ）
@@ -257,48 +434,80 @@ def phase2(ciphertext, candidates, language='auto', max_candidates=80,
     return unique
 
 
-def refine_right_ring(ciphertext, results, verbose=True):
+def refine_rings(ciphertext, results, accuracy=False, verbose=True):
     """
-    各上位候補について、右ローターのリング設定を 26 通り再探索。
+    各上位候補について、リング設定を再探索。
+    通常モード: 右ローターのみ（26通り）。
+    精度モード: 中・右両方（26x26 = 676通り）。
     リング変更時は初期位置も同じだけシフトする必要がある。
     """
     ct_ints = text_to_ints(ciphertext)
     if verbose:
-        print(f'[Refine] testing 26 right-rotor ring settings '
+        n_trials = 26 * 26 if accuracy else 26
+        print(f'[Refine] testing {n_trials} ring settings '
               f'for {len(results)} candidates')
     refined = []
     for result in results:
         score, rotors, positions, rings, pb, lang, _ = result
         best = result
-        for r in range(26):
-            new_rings = (rings[0], rings[1], r)
-            new_positions = (positions[0], positions[1], (positions[2] + r) % 26)
-            decrypted = decrypt_with_settings(
-                ct_ints, rotors, 'B', new_rings, new_positions, pb)
-            text = ints_to_text(decrypted)
-            lang2, score2 = best_language_score(text)
-            if score2 > best[0]:
-                best = (score2, rotors, new_positions, new_rings, pb, lang2, text)
+        if accuracy:
+            for rm in range(26):
+                for rr in range(26):
+                    new_rings = (rings[0], rm, rr)
+                    new_positions = (
+                        positions[0],
+                        (positions[1] + rm) % 26,
+                        (positions[2] + rr) % 26,
+                    )
+                    decrypted = decrypt_with_settings(
+                        ct_ints, rotors, 'B', new_rings, new_positions, pb)
+                    text = ints_to_text(decrypted)
+                    lang2, score2 = best_language_score(text)
+                    if score2 > best[0]:
+                        best = (score2, rotors, new_positions, new_rings,
+                                pb, lang2, text)
+        else:
+            for r in range(26):
+                new_rings = (rings[0], rings[1], r)
+                new_positions = (positions[0], positions[1],
+                                 (positions[2] + r) % 26)
+                decrypted = decrypt_with_settings(
+                    ct_ints, rotors, 'B', new_rings, new_positions, pb)
+                text = ints_to_text(decrypted)
+                lang2, score2 = best_language_score(text)
+                if score2 > best[0]:
+                    best = (score2, rotors, new_positions, new_rings,
+                            pb, lang2, text)
         refined.append(best)
     refined.sort(reverse=True, key=lambda r: r[0])
     return refined
 
 
+# 既存名で互換性維持
+refine_right_ring = refine_rings
+
+
 def attack(ciphertext, language='auto', top_n=200, max_candidates=80,
-           sample_len=100, top_results=5, verbose=True):
+           sample_len=100, top_results=5, accuracy=False,
+           n_restarts=3, max_pairs=10, tier2_n=300, verbose=True):
     """
     完全な攻撃シーケンス。上位 top_results 個の候補を返す。
+
+    accuracy=True で精度モード（時間無制限・二段階Phase 2）。
     """
     ct_ints = text_to_ints(ciphertext)
     if len(ct_ints) < 30:
         print('警告: 暗号文が30文字未満です。統計的解読は信頼できません。')
 
     candidates = phase1(ciphertext, top_n=top_n, sample_len=sample_len,
-                        verbose=verbose)
+                        language=language, verbose=verbose)
     results = phase2(ciphertext, candidates, language=language,
                      max_candidates=max_candidates,
-                     top_results=top_results, verbose=verbose)
-    results = refine_right_ring(ciphertext, results, verbose=verbose)
+                     top_results=top_results,
+                     accuracy=accuracy, n_restarts=n_restarts,
+                     max_pairs=max_pairs, tier2_n=tier2_n, verbose=verbose)
+    results = refine_rings(ciphertext, results,
+                           accuracy=accuracy, verbose=verbose)
     return results
 
 

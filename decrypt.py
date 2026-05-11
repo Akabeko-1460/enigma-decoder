@@ -90,23 +90,90 @@ def prompt_ciphertext():
     return text if text else None
 
 
-def run_attack(ciphertext, language='auto', top_n=200, max_candidates=80,
-               sample_len=100):
+def prompt_language():
+    """平文言語の選択を尋ねる。"""
+    print()
+    print('平文の言語を選んでください:')
+    print('  [1] auto     自動判定（英語かローマ字を内部でスコアして高い方を採用）')
+    print('  [2] english  英文')
+    print('  [3] romaji   ローマ字日本語')
+    while True:
+        try:
+            choice = input('言語 [1-3, デフォルト 1] > ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 'auto'
+        if choice == '' or choice == '1':
+            return 'auto'
+        if choice == '2' or choice.lower() in ('english', 'en'):
+            return 'english'
+        if choice == '3' or choice.lower() in ('romaji', 'ja', 'jp'):
+            return 'romaji'
+        print('  → 1, 2, 3 のいずれかを入力してください。')
+
+
+def prompt_mode(text_len):
+    """探索モードの選択を尋ねる。"""
+    print()
+    print('探索モードを選んでください:')
+    print('  [1] 通常モード  約1〜3分。0〜2ペアのプラグボードなら十分。')
+    print('  [2] 精度モード  約10〜30分。短文・多めプラグボードでも追跡。')
+    print('  [3] 徹底モード  数時間。極端な条件でも諦めない（時間無制限）。')
+    while True:
+        try:
+            choice = input('モード [1-3, デフォルト 1] > ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 'normal'
+        if choice == '' or choice == '1':
+            return 'normal'
+        if choice == '2':
+            return 'accuracy'
+        if choice == '3':
+            return 'thorough'
+        print('  → 1, 2, 3 のいずれかを入力してください。')
+
+
+# モード別のパラメータ
+MODE_PARAMS = {
+    'normal':    dict(top_n=200,   max_candidates=80,    tier2_n=0,    accuracy=False, n_restarts=0, sample_len=100),
+    'accuracy':  dict(top_n=2000,  max_candidates=2000,  tier2_n=200,  accuracy=True,  n_restarts=2, sample_len=200),
+    'thorough':  dict(top_n=20000, max_candidates=20000, tier2_n=500,  accuracy=True,  n_restarts=4, sample_len=300),
+}
+
+
+def run_attack(ciphertext, language='auto', mode='normal'):
     """攻撃を実行して上位候補を表示する。"""
     cleaned_count = sum(1 for c in ciphertext.upper() if 'A' <= c <= 'Z')
+    params = dict(MODE_PARAMS[mode])
+    # sample_len は暗号文長で頭打ち
+    params['sample_len'] = min(params['sample_len'], cleaned_count)
+
     print()
     print(f'文字数: {cleaned_count}')
     print(f'言語: {language}')
+    print(f'モード: {mode}')
     if cleaned_count < 30:
         print('警告: 30文字未満では復号は信頼できません。')
-    elif cleaned_count < 100:
-        print('注意: 100文字未満では複数の候補から目視で選ぶ必要があります。')
-    print('（復号には1〜3分ほどかかります。お待ちください...）')
+    elif cleaned_count < 100 and mode == 'normal':
+        print('注意: 100文字未満では精度/徹底モードの利用を検討してください。')
+
+    estimated = {
+        'normal':    '1〜3分',
+        'accuracy':  '10〜30分',
+        'thorough':  '数時間（暗号文長と PC の性能による）',
+    }
+    print(f'（推定時間: {estimated[mode]}。途中で止めるには Ctrl+C）')
     print('=' * 60)
 
     results = attack(ciphertext, language=language,
-                     top_n=top_n, max_candidates=max_candidates,
-                     sample_len=sample_len, top_results=5, verbose=True)
+                     top_n=params['top_n'],
+                     max_candidates=params['max_candidates'],
+                     sample_len=params['sample_len'],
+                     accuracy=params['accuracy'],
+                     n_restarts=params['n_restarts'],
+                     tier2_n=params['tier2_n'],
+                     top_results=5, verbose=True)
 
     print()
     print('=' * 60)
@@ -125,23 +192,25 @@ def run_attack(ciphertext, language='auto', top_n=200, max_candidates=80,
             print('[INFO] 第1候補が有力ですが、第2候補も念のため確認してください。')
         else:
             print('[INFO] スコア差が小さいです。複数候補を目視で確認してください。')
+            if mode == 'normal':
+                print('       精度モードでもう一度試すと改善される可能性があります。')
 
 
 def main():
     p = argparse.ArgumentParser(
-        description='エニグマ暗号文単独攻撃（Gillogly法）')
+        description='エニグマ暗号文単独攻撃（Gillogly法 二段階）')
     p.add_argument('ciphertext', nargs='?',
                    help='復号する暗号文（A-Zのみ。空白等は無視）')
     p.add_argument('--lang', choices=['english', 'romaji', 'auto'],
-                   default='auto', help='平文言語の指定')
-    p.add_argument('--top', type=int, default=200,
-                   help='Phase 1 で残す候補数 (default: 200)')
-    p.add_argument('--max-cand', type=int, default=80,
-                   help='Phase 2 で精査する候補数 (default: 80)')
-    p.add_argument('--sample', type=int, default=100,
-                   help='Phase 1 で使う暗号文先頭の文字数 (default: 100)')
+                   default=None, help='平文言語の指定')
+    p.add_argument('--mode', choices=['normal', 'accuracy', 'thorough'],
+                   default=None, help='探索モード')
+    p.add_argument('--accuracy', action='store_true',
+                   help='精度モード（--mode accuracy と同じ）')
+    p.add_argument('--thorough', action='store_true',
+                   help='徹底モード（--mode thorough と同じ、時間無制限）')
     p.add_argument('--quick', action='store_true',
-                   help='高速モード（top=80, max-cand=20）')
+                   help='高速モード（通常モードよりさらに粗い）')
     p.add_argument('--selftest', action='store_true',
                    help='既知平文で動作確認')
     args = p.parse_args()
@@ -150,23 +219,46 @@ def main():
         selftest()
         return
 
-    # 引数で暗号文が渡されていなければ対話モード
+    # モードの解決
+    if args.thorough:
+        mode = 'thorough'
+    elif args.accuracy:
+        mode = 'accuracy'
+    elif args.mode:
+        mode = args.mode
+    else:
+        mode = None  # 後で対話で決める
+
+    # 暗号文の取得
     ciphertext = args.ciphertext
-    if not ciphertext:
+    interactive = ciphertext is None
+    if interactive:
         ciphertext = prompt_ciphertext()
         if not ciphertext:
             print('暗号文が入力されませんでした。終了します。')
             return
 
-    if args.quick:
-        args.top = 80
-        args.max_cand = 20
+    # 言語の決定
+    language = args.lang
+    if language is None:
+        if interactive:
+            language = prompt_language()
+        else:
+            language = 'auto'
 
-    run_attack(ciphertext,
-               language=args.lang,
-               top_n=args.top,
-               max_candidates=args.max_cand,
-               sample_len=args.sample)
+    # モードの決定
+    if mode is None:
+        if interactive:
+            cleaned_count = sum(1 for c in ciphertext.upper() if 'A' <= c <= 'Z')
+            mode = prompt_mode(cleaned_count)
+        else:
+            mode = 'normal'
+
+    # --quick は通常モードのさらに高速版（後方互換）
+    if args.quick:
+        mode = 'normal'
+
+    run_attack(ciphertext, language=language, mode=mode)
 
 
 if __name__ == '__main__':
