@@ -134,18 +134,57 @@ def prompt_mode(text_len):
         print('  → 1, 2, 3 のいずれかを入力してください。')
 
 
-# モード別のパラメータ
+# モード別のパラメータ（ベースライン。短文では run_attack() が動的に上書きする）
 MODE_PARAMS = {
-    'normal':    dict(top_n=200,   max_candidates=80,    tier2_n=0,    accuracy=False, n_restarts=0, sample_len=100),
-    'accuracy':  dict(top_n=2000,  max_candidates=2000,  tier2_n=200,  accuracy=True,  n_restarts=2, sample_len=200),
-    'thorough':  dict(top_n=20000, max_candidates=20000, tier2_n=500,  accuracy=True,  n_restarts=4, sample_len=300),
+    'normal':    dict(top_n=200,   max_candidates=300,   tier2_n=0,    accuracy=False, n_restarts=2, sample_len=100),
+    'accuracy':  dict(top_n=3000,  max_candidates=3000,  tier2_n=300,  accuracy=True,  n_restarts=3, sample_len=200),
+    'thorough':  dict(top_n=20000, max_candidates=20000, tier2_n=800,  accuracy=True,  n_restarts=5, sample_len=300),
 }
+
+
+def _scale_params_for_length(params, cleaned_count, mode):
+    """
+    短文では IC 分散が大きく正解候補が top_n の外に落ちやすいため、
+    文字数に応じて探索幅を動的に拡大する。
+    n=60 のとき正解のランクは平均 ~500 (IC のみ) → top_n ≥ 2000 が必要。
+    """
+    p = dict(params)
+    n = cleaned_count
+
+    if mode == 'normal':
+        if n < 80:
+            p['top_n']          = max(p['top_n'], 4000)
+            p['max_candidates'] = max(p['max_candidates'], 800)
+            p['n_restarts']     = max(p['n_restarts'], 4)
+            p['accuracy']       = True
+            p['tier2_n']        = max(p.get('tier2_n', 0), 200)
+        elif n < 130:
+            p['top_n']          = max(p['top_n'], 2000)
+            p['max_candidates'] = max(p['max_candidates'], 500)
+            p['n_restarts']     = max(p['n_restarts'], 3)
+            p['accuracy']       = True
+            p['tier2_n']        = max(p.get('tier2_n', 0), 150)
+        elif n < 200:
+            p['top_n']          = max(p['top_n'], 800)
+            p['max_candidates'] = max(p['max_candidates'], 400)
+            p['n_restarts']     = max(p['n_restarts'], 2)
+    elif mode == 'accuracy':
+        if n < 80:
+            p['top_n']          = max(p['top_n'], 8000)
+            p['max_candidates'] = max(p['max_candidates'], 8000)
+            p['n_restarts']     = max(p['n_restarts'], 5)
+        elif n < 130:
+            p['top_n']          = max(p['top_n'], 5000)
+            p['max_candidates'] = max(p['max_candidates'], 5000)
+            p['n_restarts']     = max(p['n_restarts'], 4)
+
+    return p
 
 
 def run_attack(ciphertext, language='auto', mode='normal'):
     """攻撃を実行して上位候補を表示する。"""
     cleaned_count = sum(1 for c in ciphertext.upper() if 'A' <= c <= 'Z')
-    params = dict(MODE_PARAMS[mode])
+    params = _scale_params_for_length(MODE_PARAMS[mode], cleaned_count, mode)
     # sample_len は暗号文長で頭打ち
     params['sample_len'] = min(params['sample_len'], cleaned_count)
 
@@ -155,8 +194,8 @@ def run_attack(ciphertext, language='auto', mode='normal'):
     print(f'モード: {mode}')
     if cleaned_count < 30:
         print('警告: 30文字未満では復号は信頼できません。')
-    elif cleaned_count < 100 and mode == 'normal':
-        print('注意: 100文字未満では精度/徹底モードの利用を検討してください。')
+    elif cleaned_count < 80 and mode == 'normal':
+        print('注意: 80文字未満のため探索幅を自動拡大しました（通常より遅くなります）。')
 
     estimated = {
         'normal':    '1〜3分',
