@@ -7,15 +7,43 @@
 
 ```
 enigma_breaker/
-├── enigma.py     # エニグマM3シミュレータ（自前実装）
-├── corpora.py    # 言語モデル構築用の英文・ローマ字コーパス
-├── scoring.py    # n-gram 言語スコアリング
-├── attack.py     # Gillogly 二段階攻撃（通常・精度・徹底モード）
-├── decrypt.py    # コマンドラインエントリ（対話モード対応）
-└── README.md     # このファイル
+├── enigma.py                    # エニグマM3シミュレータ（自前実装）
+├── corpora.py                   # 言語モデル構築用の英文・ローマ字コーパス
+├── scoring.py                   # n-gram 言語スコアリング
+├── attack.py                    # Gillogly 二段階攻撃（通常・精度・徹底モード）
+├── decrypt.py                   # コマンドラインエントリ（対話モード対応）
+├── decrypt_known_plugboard.py   # プラグボード既知版解読ツール
+└── README.md                    # このファイル
 ```
 
 外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
+
+## プラグボード既知版 (`decrypt_known_plugboard.py`)
+
+プラグボード設定が事前に判明している場合に使うツール。
+山登り法（Phase 2）が不要になるため、**通常版の 1〜3分が数分以内に完結**し、
+**短文や多プラグボードでも精度が大幅に向上**する。
+
+```bash
+python decrypt_known_plugboard.py             # 対話モード
+python decrypt_known_plugboard.py --selftest  # 動作確認
+python decrypt_known_plugboard.py --lang english <暗号文>
+python decrypt_known_plugboard.py --accuracy <暗号文>   # リングを 676通り探索
+```
+
+ハードコードされたプラグボードは `decrypt_known_plugboard.py` 冒頭の
+`KNOWN_PLUGBOARD` 定数を書き換えて変更する。
+
+**通常版との比較**:
+
+| | 通常版 (`decrypt.py`) | 既知版 (`decrypt_known_plugboard.py`) |
+|---|---|---|
+| Phase 1 | IC スコア（プラグボード無し）| n-gram スコア（既知 PB 適用）|
+| Phase 2 | 山登りで PB を推定（重い）| **不要** |
+| 所要時間 | 1〜数十分 | **1〜5分** |
+| 短文精度 | プラグボード数に依存 | **大幅向上** |
+
+---
 
 ## 基本の使い方
 
