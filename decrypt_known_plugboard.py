@@ -29,7 +29,9 @@ from itertools import permutations, product
 
 from enigma import (Enigma, precompute_rotor_arrays, decrypt_fast,
                     decrypt_with_settings)
-from scoring import english_model, romaji_model, best_language_score
+from scoring import (english_model, romaji_model,
+                     best_language_score, best_language_score_short,
+                     word_fitness)
 from attack import text_to_ints, ints_to_text, format_result
 
 # ================================================================
@@ -142,19 +144,26 @@ def refine_rings_fixed_plugboard(ciphertext, results, plugboard_array,
     プラグボード固定でリング設定のみを再探索する。
 
     通常の refine_rings はリング探索後にプラグボードも再最適化するが、
-    プラグボードが確定している場合はその必要がなく、純粋にリング26通り
-    （accuracy モードでは中×右ローター 676通り）を試すだけで済む。
+    プラグボードが確定している場合はその必要がない。
+
+    評価関数として best_language_score_short（n-gram + 単語リスト照合）を
+    使用する。短文（40〜80字）では n-gram のノイズが大きく、実在英単語の
+    有無を加味しないと正しいリング設定を選べない場合がある。
     """
     ct_ints = text_to_ints(ciphertext)
     n_trials = 26 * 26 if accuracy else 26
     if verbose:
         print(f'[Refine] {n_trials} ring settings × {len(results)} 候補'
-              f'（プラグボード固定）')
+              f'（プラグボード固定 / n-gram + 単語リスト照合）')
 
     refined = []
     for result in results:
         score, rotors, positions, rings, pb, lang, _ = result
-        best = result
+        # 初期スコアも best_language_score_short で統一して比較する
+        dec0 = decrypt_with_settings(ct_ints, rotors, 'B', rings, positions, plugboard_array)
+        text0 = ints_to_text(dec0)
+        lang0, s0 = best_language_score_short(text0)
+        best = (s0, rotors, positions, rings, plugboard_array, lang0, text0)
 
         if accuracy:
             for rm in range(26):
@@ -165,7 +174,7 @@ def refine_rings_fixed_plugboard(ciphertext, results, plugboard_array,
                     dec = decrypt_with_settings(
                         ct_ints, rotors, 'B', nr, np_, plugboard_array)
                     text = ints_to_text(dec)
-                    lang2, s2 = best_language_score(text)
+                    lang2, s2 = best_language_score_short(text)
                     if s2 > best[0]:
                         best = (s2, rotors, np_, nr, plugboard_array, lang2, text)
         else:
@@ -175,7 +184,7 @@ def refine_rings_fixed_plugboard(ciphertext, results, plugboard_array,
                 dec = decrypt_with_settings(
                     ct_ints, rotors, 'B', nr, np_, plugboard_array)
                 text = ints_to_text(dec)
-                lang2, s2 = best_language_score(text)
+                lang2, s2 = best_language_score_short(text)
                 if s2 > best[0]:
                     best = (s2, rotors, np_, nr, plugboard_array, lang2, text)
 
@@ -211,12 +220,13 @@ def attack_known_plugboard(ciphertext, plugboard_str=KNOWN_PLUGBOARD,
     )
 
     # Phase 1 上位候補を結果フォーマット (score, rotors, pos, rings, pb, lang, text) に変換
+    # best_language_score_short を使うことで短文でも正しい候補が上位に来やすくなる
     results = []
     for _p1_score, rotors, positions in candidates:
         dec = decrypt_with_settings(
             ct_ints, rotors, 'B', (0, 0, 0), positions, pb_array)
         text = ints_to_text(dec)
-        lang, final_score = best_language_score(text)
+        lang, final_score = best_language_score_short(text)
         results.append((final_score, rotors, positions, (0, 0, 0),
                         pb_array, lang, text))
 
