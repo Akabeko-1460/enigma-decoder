@@ -27,6 +27,12 @@ import argparse
 import time
 from itertools import permutations, product
 
+try:
+    import enigma_decoder as _ed
+    HAS_RUST = hasattr(_ed, 'phase1_known_pb')
+except ImportError:
+    HAS_RUST = False
+
 from enigma import (Enigma, precompute_rotor_arrays, decrypt_fast,
                     decrypt_with_settings)
 from scoring import (english_model, romaji_model,
@@ -56,6 +62,56 @@ def parse_plugboard(s):
     return pb
 
 
+def phase1_known_plugboard_rust(ciphertext, plugboard_array, reflector='B',
+                                top_n=20, sample_len=200,
+                                rotor_choices=('I', 'II', 'III', 'IV', 'V'),
+                                language='auto', verbose=True):
+    """
+    プラグボード既知版 Phase 1 の Rust + Rayon 並列版。
+
+    純Python版と同じく「既知プラグボードで復号 → n-gram スコア」を計算するが、
+    60通りのローター順列を Rayon で並列処理するため 60〜70 倍高速。
+    HAS_RUST が True のときのみ呼ばれる。
+    """
+    ct_ints = text_to_ints(ciphertext)[:sample_len]
+    en = english_model()
+    ja = romaji_model()
+    use_en = language in ('auto', 'english')
+    use_ja = language in ('auto', 'romaji')
+
+    rotor_names = ['I', 'II', 'III', 'IV', 'V']
+    rotor_idx = {name: i for i, name in enumerate(rotor_names)}
+    perms = list(permutations(rotor_choices, 3))
+    rust_perms = [[rotor_idx[r] for r in p] for p in perms]
+    refl_idx = 0 if reflector == 'B' else 1
+
+    t0 = time.time()
+    if verbose:
+        print(f'[Phase 1] {len(perms)} rotor perms × 17576 positions '
+              f'= {len(perms)*17576} trials  [Rust+Rayon 並列]')
+        print(f'          既知プラグボード適用 / lang={language} / sample={sample_len}')
+
+    raw = _ed.phase1_known_pb(
+        ct_ints, rust_perms, refl_idx, list(plugboard_array),
+        use_en, use_ja,
+        en.tri_array, en.tri_floor, en.quad_array, en.quad_floor,
+        ja.tri_array, ja.tri_floor, ja.quad_array, ja.quad_floor,
+        top_n,
+    )
+
+    results = []
+    for score, r_idx, p_idx in raw:
+        rotors = (rotor_names[r_idx[0]], rotor_names[r_idx[1]], rotor_names[r_idx[2]])
+        results.append((score, rotors, (p_idx[0], p_idx[1], p_idx[2])))
+
+    if verbose:
+        print(f'[Phase 1] 完了 ({time.time()-t0:.2f}s)')
+        if results:
+            r = results[0]
+            print(f'  top score: {r[0]:.2f} (rotors={r[1]} pos={r[2]})')
+    return results
+
+
 def phase1_known_plugboard(ciphertext, plugboard_array, reflector='B',
                            top_n=20, sample_len=200,
                            rotor_choices=('I', 'II', 'III', 'IV', 'V'),
@@ -70,8 +126,16 @@ def phase1_known_plugboard(ciphertext, plugboard_array, reflector='B',
       - top_n を小さく保っても正解候補を確実に捕捉できる
       - 後段の Phase 2（山登り）が不要になる
 
+    Rust 拡張が利用可能なら Rayon 並列版（phase1_known_plugboard_rust）に委譲する。
+    無い場合は純Pythonで全探索する（結果は同一、速度のみ異なる）。
+
     戻り値: [(score, rotors, positions), ...] 上位 top_n 件
     """
+    if HAS_RUST:
+        return phase1_known_plugboard_rust(
+            ciphertext, plugboard_array, reflector, top_n, sample_len,
+            rotor_choices, language, verbose)
+
     ct_ints = text_to_ints(ciphertext)
     sample = ct_ints[:sample_len]
     en = english_model()

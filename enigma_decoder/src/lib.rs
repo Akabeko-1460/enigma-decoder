@@ -249,6 +249,82 @@ fn phase1(
 }
 
 // ------------------------------------------------------------------
+// Phase 1 (known plugboard): exhaustive rotor + position search with a
+// fixed, already-known plugboard applied.
+//
+// When the plugboard is known we can decrypt with it directly and score the
+// result with n-grams (trigram + quadgram), which is a far stronger signal
+// than the plugboard-invariant IC used by `phase1`. This lets the correct
+// rotor+position surface at the very top even for short ciphertexts, so no
+// Phase 2 hill-climb is needed afterwards.
+// ------------------------------------------------------------------
+
+#[pyfunction]
+fn phase1_known_pb(
+    ct: Vec<u8>,
+    rotor_perms: Vec<[usize; 3]>,
+    reflector_idx: usize,
+    plugboard: Vec<u8>,
+    use_en: bool,
+    use_ja: bool,
+    en_tri: Vec<f64>,
+    en_tri_floor: f64,
+    en_quad: Vec<f64>,
+    en_quad_floor: f64,
+    ja_tri: Vec<f64>,
+    ja_tri_floor: f64,
+    ja_quad: Vec<f64>,
+    ja_quad_floor: f64,
+    top_n: usize,
+) -> PyResult<Vec<(f64, [usize; 3], [u8; 3])>> {
+    // Copy the incoming plugboard (length 26) into a fixed-size array so the
+    // parallel closure can capture it by reference (Sync).
+    let mut pb = [0u8; 26];
+    for i in 0..26 {
+        pb[i] = plugboard[i];
+    }
+
+    let en_sc = Scorer::new(&en_tri, en_tri_floor, &en_quad, en_quad_floor);
+    let ja_sc = Scorer::new(&ja_tri, ja_tri_floor, &ja_quad, ja_quad_floor);
+
+    let mut all_results: Vec<(f64, [usize; 3], [u8; 3])> =
+        rotor_perms.par_iter().flat_map(|&rotors| {
+            let core = EnigmaCore::new(rotors, reflector_idx);
+            let mut out = Vec::with_capacity(ct.len());
+            let mut local: Vec<(f64, [usize; 3], [u8; 3])> = Vec::with_capacity(17576);
+
+            for p0 in 0u8..26 {
+                for p1 in 0u8..26 {
+                    for p2 in 0u8..26 {
+                        core.decrypt(&ct, [0, 0, 0], [p0, p1, p2], &pb, &mut out);
+                        // language='auto' → max over enabled languages
+                        let mut s = f64::NEG_INFINITY;
+                        if use_en {
+                            let se = en_sc.score(&out);
+                            if se > s { s = se; }
+                        }
+                        if use_ja {
+                            let sj = ja_sc.score(&out);
+                            if sj > s { s = sj; }
+                        }
+                        local.push((s, rotors, [p0, p1, p2]));
+                    }
+                }
+            }
+            local.sort_unstable_by(|a, b|
+                b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+            local.truncate(top_n);
+            local
+        }).collect();
+
+    all_results.sort_unstable_by(|a, b|
+        b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    all_results.truncate(top_n);
+
+    Ok(all_results)
+}
+
+// ------------------------------------------------------------------
 // Phase 2: plugboard hill climbing
 // ------------------------------------------------------------------
 
@@ -791,6 +867,7 @@ fn phase1b(
 #[pymodule]
 fn enigma_decoder(m: &Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(phase1, m)?)?;
+    m.add_function(wrap_pyfunction!(phase1_known_pb, m)?)?;
     m.add_function(wrap_pyfunction!(phase1b, m)?)?;
     m.add_function(wrap_pyfunction!(phase1b_sa, m)?)?;
     m.add_function(wrap_pyfunction!(phase2_fast, m)?)?;

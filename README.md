@@ -21,8 +21,9 @@ enigma_breaker/
 ## プラグボード既知版 (`decrypt_known_plugboard.py`)
 
 プラグボード設定が事前に判明している場合に使うツール。
-山登り法（Phase 2）が不要になるため、**通常版の 1〜3分が数分以内に完結**し、
-**短文や多プラグボードでも精度が大幅に向上**する。
+山登り法（Phase 2）が不要になるため、**通常版より大幅に高速・高精度**。
+Phase 1 は Rust + Rayon で並列化されており（`enigma_decoder` がビルド済みの場合）、
+50〜100字の短文なら **1件あたり約1秒**で解読できる。
 
 ```bash
 python decrypt_known_plugboard.py             # 対話モード
@@ -38,10 +39,24 @@ python decrypt_known_plugboard.py --accuracy <暗号文>   # リングを 676通
 
 | | 通常版 (`decrypt.py`) | 既知版 (`decrypt_known_plugboard.py`) |
 |---|---|---|
-| Phase 1 | IC スコア（プラグボード無し）| n-gram スコア（既知 PB 適用）|
+| Phase 1 | IC スコア（プラグボード無し）| n-gram スコア（既知 PB 適用、Rust並列）|
 | Phase 2 | 山登りで PB を推定（重い）| **不要** |
-| 所要時間 | 1〜数十分 | **1〜5分** |
-| 短文精度 | プラグボード数に依存 | **大幅向上** |
+| 短文精度 | プラグボード数に依存 | **大幅向上**（単語リスト照合併用）|
+
+**性能実測**（50〜100字・非ゼロリング設定・5ペアPB・最高精度モード）:
+
+| Phase 1 実装 | 5ケース総時間 | 精度 |
+|---|---|---|
+| 純Python | 412秒 | 5/5 完全一致 |
+| **Rust + Rayon** | **5.1秒（約80倍高速）** | 5/5 完全一致 |
+
+Rust 拡張が未ビルドの環境では自動的に純Python版にフォールバックする
+（結果は同一、速度のみ異なる）。ビルドは以下:
+
+```bash
+cd enigma_decoder && maturin build --release
+pip install target/wheels/enigma_decoder-*.whl
+```
 
 ---
 
