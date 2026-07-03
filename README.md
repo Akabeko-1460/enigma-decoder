@@ -13,10 +13,55 @@ enigma_breaker/
 ├── attack.py                    # Gillogly 二段階攻撃（通常・精度・徹底モード）
 ├── decrypt.py                   # コマンドラインエントリ（対話モード対応）
 ├── decrypt_known_plugboard.py   # プラグボード既知版解読ツール
+├── decrypt_plugboard.py         # プラグボード未知・最高精度版（段階スコア）
+├── wordlist.py                  # 短文スコア用の英単語リスト
+├── enigma_decoder/              # Rust + Rayon 高速コア（PyO3）
 └── README.md                    # このファイル
 ```
 
-外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
+純Python部分は外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
+Rust コア（`enigma_decoder`）はオプションで、ビルドすれば数十〜80倍高速化する。
+
+## プラグボード未知・最高精度版 (`decrypt_plugboard.py`)
+
+プラグボードが**分からない**状態から全設定（ローター・位置・リング・プラグボード）を
+復元する、最高精度の解読機。文献
+[Ostwald & Weierud 2017, "Modern breaking of Enigma ciphertexts"](https://www.tandfonline.com/doi/abs/10.1080/01611194.2016.1238423)
+の**三段階スコアエスカレーション**を実装している。
+
+```bash
+python decrypt_plugboard.py             # 対話モード
+python decrypt_plugboard.py --selftest  # 動作確認（155字・6ペアを復元）
+python decrypt_plugboard.py --lang english <暗号文>
+```
+
+**解読フェーズ**:
+
+```
+Phase A  ローター順＋初期位置 … IC + bigram-IC で全探索（プラグボード不変性を利用）
+Phase C  プラグボード復元      … IC → bigram → trigram の三段階山登り
+                                ＋マルチスタート＋SA 磨き上げ（Rust/Rayon 並列）
+Phase B  リング設定            … 右→中ローターのリングを再探索
+Phase D  最終検証              … n-gram＋単語リスト照合で候補確定
+```
+
+**なぜ段階スコアが効くのか**: プラグボードが数本しか合っていない段階では復号文は
+まだランダムに近く、trigram/quadgram はノイズだらけで正しい方向を示せない。
+この段階では頑健な IC/bigram の方が信号が強い。プラグが増えて文が復元されるにつれ、
+より高次の n-gram に切り替えると識別力が最大化される。
+
+**性能実証**（同一候補・同一SA予算で、trigram単独SAと比較）:
+
+| 暗号文 | プラグボード | 段階スコア(本手法) | trigram単独SA |
+|---|---|---|---|
+| 125字 | 8ペア | 完全解読 | 完全解読 |
+| 126字 | 10ペア | 完全解読 | 完全解読 |
+| 126字 | 9ペア | **完全解読** | 失敗（別候補を誤選択）|
+
+中程度長×多プラグの難条件で段階スコアが優位。50〜65字の極短文は情報理論的限界に
+近く、本手法でも余分なプラグを過学習することがある（どのアルゴリズムでも同じ壁）。
+
+---
 
 ## プラグボード既知版 (`decrypt_known_plugboard.py`)
 

@@ -42,6 +42,18 @@ class LanguageModel:
         self.quad, self.quad_floor = build_ngram_logprobs(cleaned, 4)
 
     @property
+    def bi_array(self):
+        """bigram 対数確率を 676 要素の平坦配列で返す（Rust 段階スコア用）。"""
+        if hasattr(self, '_bi_array'):
+            return self._bi_array
+        arr = [0.0] * (26**2)
+        for k, v in self.bi.items():
+            idx = (ord(k[0])-65)*26 + (ord(k[1])-65)
+            arr[idx] = v
+        self._bi_array = arr
+        return arr
+
+    @property
     def tri_array(self):
         if hasattr(self, '_tri_array'):
             return self._tri_array
