@@ -7,10 +7,20 @@
 """
 
 import math
+import os
+import gzip
 from collections import Counter
 
 from corpora import ENGLISH_CORPUS, ROMAJI_CORPUS
-from wordlist import ENGLISH_WORDS
+
+# 単語リストは大規模版（wordlist_data.py）を優先し、無ければ手選別版へフォールバック。
+try:
+    from wordlist_data import ENGLISH_WORDS
+except ImportError:
+    from wordlist import ENGLISH_WORDS
+
+# 事前計算済み n-gram 頻度表（大規模コーパス由来）。存在すれば英語モデルに使う。
+_NGRAM_FILE = os.path.join(os.path.dirname(__file__), 'ngrams_en.txt.gz')
 
 
 def clean(text):
@@ -28,18 +38,55 @@ def build_ngram_logprobs(text, n):
     return table, floor
 
 
+def load_ngram_counts(path):
+    """
+    事前計算済み n-gram 頻度表（gzip, "KEY COUNT" 形式）を読み込み、
+    {'bigram': (table, floor), 'trigram': ..., 'quadgram': ...} を返す。
+    各セクションは '# name total' 行で区切られる。total は枝刈り前の総数。
+    """
+    counts = {'bigram': {}, 'trigram': {}, 'quadgram': {}}
+    totals = {}
+    section = None
+    opener = gzip.open if path.endswith('.gz') else open
+    with opener(path, 'rt', encoding='ascii') as f:
+        for line in f:
+            if line.startswith('#'):
+                parts = line[1:].split()
+                if parts and parts[0] in counts:
+                    section = parts[0]
+                    totals[section] = int(parts[1])
+                continue
+            k, v = line.split()
+            counts[section][k] = int(v)
+    tables = {}
+    for name, total in totals.items():
+        floor = math.log10(0.01 / total)
+        tables[name] = ({k: math.log10(v / total)
+                         for k, v in counts[name].items()}, floor)
+    return tables
+
+
 class LanguageModel:
     """ある言語の n-gram モデル一式。"""
 
-    def __init__(self, name, corpus):
+    def __init__(self, name, corpus=None, ngram_file=None):
         self.name = name
-        cleaned = clean(corpus)
-        if len(cleaned) < 1000:
-            raise ValueError(f'{name}: corpus too small ({len(cleaned)} chars)')
-        self.cleaned_len = len(cleaned)
-        self.bi, self.bi_floor = build_ngram_logprobs(cleaned, 2)
-        self.tri, self.tri_floor = build_ngram_logprobs(cleaned, 3)
-        self.quad, self.quad_floor = build_ngram_logprobs(cleaned, 4)
+        if ngram_file and os.path.exists(ngram_file):
+            # 事前計算済みの大規模 n-gram 表から構築（高精度）
+            t = load_ngram_counts(ngram_file)
+            self.bi, self.bi_floor = t['bigram']
+            self.tri, self.tri_floor = t['trigram']
+            self.quad, self.quad_floor = t['quadgram']
+            self.cleaned_len = None
+        else:
+            # 組み込みコーパスから構築（フォールバック）
+            cleaned = clean(corpus)
+            if len(cleaned) < 1000:
+                raise ValueError(f'{name}: corpus too small ({len(cleaned)} chars)')
+            self.cleaned_len = len(cleaned)
+            self.bi, self.bi_floor = build_ngram_logprobs(cleaned, 2)
+            self.tri, self.tri_floor = build_ngram_logprobs(cleaned, 3)
+            self.quad, self.quad_floor = build_ngram_logprobs(cleaned, 4)
 
     @property
     def bi_array(self):
@@ -123,7 +170,7 @@ class LanguageModel:
         return base + 0.5 * wf / max(1, len(text))
 
 
-def word_fitness(text, min_len=4, max_len=9):
+def word_fitness(text, min_len=4, max_len=12):
     """
     テキスト中に実在する英単語をすべて検出し、単語長の合計を返す。
 
@@ -162,7 +209,11 @@ _romaji = None
 def english_model():
     global _english
     if _english is None:
-        _english = LanguageModel('english', ENGLISH_CORPUS)
+        if os.path.exists(_NGRAM_FILE):
+            # 大規模コーパス由来の事前計算 n-gram 表を優先（高精度）
+            _english = LanguageModel('english', ngram_file=_NGRAM_FILE)
+        else:
+            _english = LanguageModel('english', ENGLISH_CORPUS)
     return _english
 
 
