@@ -7,15 +7,145 @@
 
 ```
 enigma_breaker/
-├── enigma.py     # エニグマM3シミュレータ（自前実装）
-├── corpora.py    # 言語モデル構築用の英文・ローマ字コーパス
-├── scoring.py    # n-gram 言語スコアリング
-├── attack.py     # Gillogly 二段階攻撃（通常・精度・徹底モード）
-├── decrypt.py    # コマンドラインエントリ（対話モード対応）
-└── README.md     # このファイル
+├── enigma.py                    # エニグマM3シミュレータ（自前実装）
+├── corpora.py                   # 言語モデル構築用の英文・ローマ字コーパス
+├── scoring.py                   # n-gram 言語スコアリング
+├── attack.py                    # Gillogly 二段階攻撃（通常・精度・徹底モード）
+├── decrypt.py                   # コマンドラインエントリ（対話モード対応）
+├── decrypt_known_plugboard.py   # プラグボード既知版解読ツール
+├── decrypt_plugboard.py         # プラグボード未知・最高精度版（段階スコア）
+├── wordlist.py                  # 短文スコア用の英単語リスト（手選別・フォールバック）
+├── wordlist_data.py             # 拡張英単語リスト（8800語, 自動生成）
+├── ngrams_en.txt.gz             # 大規模コーパス由来の n-gram 頻度表（gzip 224KB）
+├── enigma_decoder/              # Rust + Rayon 高速コア（PyO3）
+├── web/                         # Next.js Web アプリ（生成機・復号機・解読機）
+└── README.md                    # このファイル
 ```
 
-外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
+## Web アプリ (`web/`)
+
+Next.js（App Router / TypeScript）製の Web フロントエンド。詳細は `web/README.md`。
+
+- **生成機・復号機**（`/machine`）: 内部状態を固定したエニグマで平文⇄暗号文を相互変換。
+  エニグマを TypeScript に移植し（`AAAAA→BDZGO` で検証）ブラウザ内で即時実行。
+- **解読機**（`/break/known-plugboard`, `/break/plugboard`）: API ルートが本体の
+  Python + Rust 解読機を呼び出し、暗号文単独で設定を復元。
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:3000
+```
+
+純Python部分は外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
+Rust コア（`enigma_decoder`）はオプションで、ビルドすれば数十〜80倍高速化する。
+
+## 精度を左右する言語モデル
+
+解読の成否は「復号文が自然言語らしいか」を測る言語モデルの質でほぼ決まる。
+本ツールは大規模コーパス（Pride and Prejudice / War and Peace / Shakespeare、
+計 約390万字）から事前計算した n-gram 頻度表 `ngrams_en.txt.gz` を同梱している。
+
+| | 旧（組み込み小コーパス）| 現（大規模 n-gram 表）|
+|---|---|---|
+| コーパス | 約3千字 | **約390万字** |
+| trigram 網羅 | 8.3% | **48.9%（実用ほぼ全域）** |
+| quadgram 網羅 | 0.5% | **15.3%** |
+| 単語リスト | 982語 | **8,806語** |
+
+**精度への効果**（プラグボード未知・段階スコア・50〜150字×2〜10ペア 10ケース）:
+
+| 言語モデル | 完全解読 | 文字一致率 |
+|---|---|---|
+| 小コーパス | 7/10 | 93.0% |
+| **大規模 n-gram 表** | **10/10** | **100%** |
+
+`ngrams_en.txt.gz` が無い環境では自動的に組み込みコーパスへフォールバックする
+（精度は落ちるが動作する）。頻度表は以下で再生成できる（任意のコーパスで差し替え可）。
+
+短文の到達限界（プラグボードあり・暗号文単独）: 大規模モデルで **約34字**まで
+解読可能を確認。29〜33字はユニシティ距離を下回り、どの手法でも不安定。
+
+## プラグボード未知・最高精度版 (`decrypt_plugboard.py`)
+
+プラグボードが**分からない**状態から全設定（ローター・位置・リング・プラグボード）を
+復元する、最高精度の解読機。文献
+[Ostwald & Weierud 2017, "Modern breaking of Enigma ciphertexts"](https://www.tandfonline.com/doi/abs/10.1080/01611194.2016.1238423)
+の**三段階スコアエスカレーション**を実装している。
+
+```bash
+python decrypt_plugboard.py             # 対話モード
+python decrypt_plugboard.py --selftest  # 動作確認（155字・6ペアを復元）
+python decrypt_plugboard.py --lang english <暗号文>
+```
+
+**解読フェーズ**:
+
+```
+Phase A  ローター順＋初期位置 … IC + bigram-IC で全探索（プラグボード不変性を利用）
+Phase C  プラグボード復元      … IC → bigram → trigram の三段階山登り
+                                ＋マルチスタート＋SA 磨き上げ（Rust/Rayon 並列）
+Phase B  リング設定            … 右→中ローターのリングを再探索
+Phase D  最終検証              … n-gram＋単語リスト照合で候補確定
+```
+
+**なぜ段階スコアが効くのか**: プラグボードが数本しか合っていない段階では復号文は
+まだランダムに近く、trigram/quadgram はノイズだらけで正しい方向を示せない。
+この段階では頑健な IC/bigram の方が信号が強い。プラグが増えて文が復元されるにつれ、
+より高次の n-gram に切り替えると識別力が最大化される。
+
+**性能実証**（同一候補・同一SA予算で、trigram単独SAと比較）:
+
+| 暗号文 | プラグボード | 段階スコア(本手法) | trigram単独SA |
+|---|---|---|---|
+| 125字 | 8ペア | 完全解読 | 完全解読 |
+| 126字 | 10ペア | 完全解読 | 完全解読 |
+| 126字 | 9ペア | **完全解読** | 失敗（別候補を誤選択）|
+
+中程度長×多プラグの難条件で段階スコアが優位。50〜65字の極短文は情報理論的限界に
+近く、本手法でも余分なプラグを過学習することがある（どのアルゴリズムでも同じ壁）。
+
+---
+
+## プラグボード既知版 (`decrypt_known_plugboard.py`)
+
+プラグボード設定が事前に判明している場合に使うツール。
+山登り法（Phase 2）が不要になるため、**通常版より大幅に高速・高精度**。
+Phase 1 は Rust + Rayon で並列化されており（`enigma_decoder` がビルド済みの場合）、
+50〜100字の短文なら **1件あたり約1秒**で解読できる。
+
+```bash
+python decrypt_known_plugboard.py             # 対話モード
+python decrypt_known_plugboard.py --selftest  # 動作確認
+python decrypt_known_plugboard.py --lang english <暗号文>
+python decrypt_known_plugboard.py --accuracy <暗号文>   # リングを 676通り探索
+```
+
+ハードコードされたプラグボードは `decrypt_known_plugboard.py` 冒頭の
+`KNOWN_PLUGBOARD` 定数を書き換えて変更する。
+
+**通常版との比較**:
+
+| | 通常版 (`decrypt.py`) | 既知版 (`decrypt_known_plugboard.py`) |
+|---|---|---|
+| Phase 1 | IC スコア（プラグボード無し）| n-gram スコア（既知 PB 適用、Rust並列）|
+| Phase 2 | 山登りで PB を推定（重い）| **不要** |
+| 短文精度 | プラグボード数に依存 | **大幅向上**（単語リスト照合併用）|
+
+**性能実測**（50〜100字・非ゼロリング設定・5ペアPB・最高精度モード）:
+
+| Phase 1 実装 | 5ケース総時間 | 精度 |
+|---|---|---|
+| 純Python | 412秒 | 5/5 完全一致 |
+| **Rust + Rayon** | **5.1秒（約80倍高速）** | 5/5 完全一致 |
+
+Rust 拡張が未ビルドの環境では自動的に純Python版にフォールバックする
+（結果は同一、速度のみ異なる）。ビルドは以下:
+
+```bash
+cd enigma_decoder && maturin build --release
+pip install target/wheels/enigma_decoder-*.whl
+```
+
+---
 
 ## 基本の使い方
 
