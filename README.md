@@ -18,7 +18,21 @@ enigma_breaker/
 ├── wordlist_data.py             # 拡張英単語リスト（8800語, 自動生成）
 ├── ngrams_en.txt.gz             # 大規模コーパス由来の n-gram 頻度表（gzip 224KB）
 ├── enigma_decoder/              # Rust + Rayon 高速コア（PyO3）
+├── web/                         # Next.js Web アプリ（生成機・復号機・解読機）
 └── README.md                    # このファイル
+```
+
+## Web アプリ (`web/`)
+
+Next.js（App Router / TypeScript）製の Web フロントエンド。詳細は `web/README.md`。
+
+- **生成機・復号機**（`/machine`）: 内部状態を固定したエニグマで平文⇄暗号文を相互変換。
+  エニグマを TypeScript に移植し（`AAAAA→BDZGO` で検証）ブラウザ内で即時実行。
+- **解読機**（`/break/known-plugboard`, `/break/plugboard`）: API ルートが本体の
+  Python + Rust 解読機を呼び出し、暗号文単独で設定を復元。
+
+```bash
+cd web && npm install && npm run dev   # http://localhost:3000
 ```
 
 純Python部分は外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
