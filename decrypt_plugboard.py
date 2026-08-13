@@ -19,10 +19,17 @@
     頑健な IC/bigram の方が信号が強い。プラグが増えて文が復元されるにつれ、
     より高次の n-gram に切り替えると識別力が最大化される。
 
+探索の広さは3モードから選べる（MODE_PARAMS 参照）。
+    normal   … 速いが粗い。長文向け
+    accuracy … 既定。短文でも探索幅を自動拡大する
+    thorough … 最大探索。極短文・多プラグ向けだが非常に遅い
+
 使い方:
-    python decrypt_plugboard.py                 # 対話モード
+    python decrypt_plugboard.py                 # 対話モード（暗号文とモードを尋ねる）
     python decrypt_plugboard.py <ciphertext>
     python decrypt_plugboard.py --lang english <ct>
+    python decrypt_plugboard.py --mode normal <ct>
+    python decrypt_plugboard.py --thorough <ct>
     python decrypt_plugboard.py --selftest
 """
 
@@ -44,6 +51,54 @@ from attack import (text_to_ints, ints_to_text, format_result,
 
 ROTOR_NAMES = ['I', 'II', 'III', 'IV', 'V']
 _ROTOR_IDX = {n: i for i, n in enumerate(ROTOR_NAMES)}
+
+# 探索モード。decrypt.py の MODE_PARAMS と同じ語彙（normal/accuracy/thorough）。
+#   top_n           Phase A で保持するローター×位置の候補数
+#   max_candidates  Phase C で段階スコア山登りにかける候補数（支配的なコスト）
+#   n_restarts      山登りのマルチスタート回数
+#   sa_steps        SA 磨き上げのステップ数（Rust 版のみ）
+#   refine_accuracy Phase B のリング探索を 676 通り（True）か 26 通り（False）か
+#   width_scale     短文で探索幅を自動拡大する際の倍率（後述の _scale_params_for_length）
+MODE_PARAMS = {
+    'normal':   dict(top_n=200,  max_candidates=60,  n_restarts=2,
+                     sa_steps=15000,  refine_accuracy=False, width_scale=0.3),
+    'accuracy': dict(top_n=200,  max_candidates=200, n_restarts=4,
+                     sa_steps=40000,  refine_accuracy=True,  width_scale=1.0),
+    'thorough': dict(top_n=2000, max_candidates=600, n_restarts=8,
+                     sa_steps=120000, refine_accuracy=True,  width_scale=3.0),
+}
+DEFAULT_MODE = 'accuracy'
+
+MODE_LABELS = {
+    'normal':   ('通常', '目安 5〜30 秒。長文（150字以上）・少なめプラグボード向け。'),
+    'accuracy': ('精度', '目安 20〜90 秒。既定。短文でも探索幅を自動拡大する。'),
+    'thorough': ('徹底', '目安 5〜30 分。極短文・多プラグ向け。Web からは非推奨。'),
+}
+
+
+def _scale_params_for_length(params, ct_len):
+    """
+    短文では正解が Phase A の上位から落ちやすいので探索幅を広げる。
+
+    拡大幅はモードの width_scale に比例させる。こうすると「通常モードを
+    選んだのに徹底モード並みに遅くなる」ということが起きない。
+    """
+    scaled = dict(params)
+    width_scale = scaled.pop('width_scale')
+    if ct_len < 80:
+        floor_top_n, floor_candidates, floor_restarts = 3000, 300, 6
+    elif ct_len < 150:
+        floor_top_n, floor_candidates, floor_restarts = 1000, 200, 4
+    else:
+        return scaled
+
+    scaled['top_n'] = max(scaled['top_n'], int(floor_top_n * width_scale))
+    scaled['max_candidates'] = max(scaled['max_candidates'],
+                                   int(floor_candidates * width_scale))
+    # 再スタート回数だけは width_scale を掛けない。徹底モードで 8→18 のように
+    # 跳ね上がると所要時間が桁で変わってしまうため、下限としてのみ使う。
+    scaled['n_restarts'] = max(scaled['n_restarts'], floor_restarts)
+    return scaled
 
 
 def phase2_staged_rust(ciphertext, candidates, language='auto',
@@ -147,17 +202,24 @@ def _dedupe(results, top_results):
     return unique
 
 
-def attack_plugboard(ciphertext, language='auto', top_n=200, sample_len=None,
-                     max_candidates=200, max_pairs=10, n_restarts=4,
-                     sa_steps=40000, top_results=5, verbose=True):
+def attack_plugboard(ciphertext, language='auto', mode=DEFAULT_MODE,
+                     top_results=5, sample_len=None, max_pairs=10,
+                     top_n=None, max_candidates=None, n_restarts=None,
+                     sa_steps=None, refine_accuracy=None, verbose=True):
     """
-    プラグボード未知の完全解読シーケンス（最高精度）。上位 top_results 候補を返す。
+    プラグボード未知の完全解読シーケンス。上位 top_results 候補を返す。
+
+    mode で探索の広さ（＝精度と所要時間のトレードオフ）を選ぶ。
+    個別パラメータを明示すればモードの既定値を上書きできる。
 
     Phase A: phase1 で IC ベースにローター・位置を全探索（既存 attack.phase1）
     Phase C: 三段階スコアでプラグボードを復元
     Phase B: リング設定を再探索（既存 attack.refine_rings）
     Phase D: 単語リスト照合込みで最終スコア
     """
+    if mode not in MODE_PARAMS:
+        raise ValueError(f'unknown mode: {mode} (expected one of {list(MODE_PARAMS)})')
+
     ct_ints = text_to_ints(ciphertext)
     ct_len = len(ct_ints)
     if ct_len < 30:
@@ -165,44 +227,43 @@ def attack_plugboard(ciphertext, language='auto', top_n=200, sample_len=None,
     if sample_len is None:
         sample_len = min(200, ct_len)
 
-    # 短文では正解が top_n の外に落ちやすいので探索幅を広げる
-    if ct_len < 80:
-        top_n = max(top_n, 3000)
-        max_candidates = max(max_candidates, 300)
-        n_restarts = max(n_restarts, 6)
-    elif ct_len < 150:
-        top_n = max(top_n, 1000)
-        max_candidates = max(max_candidates, 200)
-        n_restarts = max(n_restarts, 4)
+    params = _scale_params_for_length(MODE_PARAMS[mode], ct_len)
+    overrides = dict(top_n=top_n, max_candidates=max_candidates,
+                     n_restarts=n_restarts, sa_steps=sa_steps,
+                     refine_accuracy=refine_accuracy)
+    params.update({k: v for k, v in overrides.items() if v is not None})
 
     # --- Phase A: ローター順＋初期位置 ---
-    candidates = phase1(ciphertext, top_n=top_n, sample_len=sample_len,
+    candidates = phase1(ciphertext, top_n=params['top_n'], sample_len=sample_len,
                         language=language, verbose=verbose)
 
     # --- Phase C: プラグボード復元（段階スコア） ---
     if HAS_RUST:
         results = phase2_staged_rust(
             ciphertext, candidates, language=language,
-            max_candidates=max_candidates, max_pairs=max_pairs,
-            n_restarts=n_restarts, sa_steps=sa_steps, verbose=verbose)
+            max_candidates=params['max_candidates'], max_pairs=max_pairs,
+            n_restarts=params['n_restarts'], sa_steps=params['sa_steps'],
+            verbose=verbose)
     else:
         results = phase2_staged_python(
             ciphertext, candidates, language=language,
-            max_candidates=min(max_candidates, 60), max_pairs=max_pairs,
-            n_restarts=n_restarts, verbose=verbose)
+            max_candidates=min(params['max_candidates'], 60), max_pairs=max_pairs,
+            n_restarts=params['n_restarts'], verbose=verbose)
 
     results = _dedupe(results, top_results)
 
     # --- Phase B: リング設定の再探索（既存の refine を流用） ---
-    results = refine_rings(ciphertext, results, accuracy=True, verbose=verbose)
+    results = refine_rings(ciphertext, results,
+                           accuracy=params['refine_accuracy'], verbose=verbose)
     results = _dedupe(results, top_results)
     return results
 
 
-def selftest():
+def selftest(mode=DEFAULT_MODE):
     """既知平文を暗号化し、プラグボードを含む全設定を復元できるか確認。"""
     print('=' * 60)
     print('  セルフテスト: プラグボード未知からの完全解読')
+    print(f'  モード: {MODE_LABELS[mode][0]}')
     print(f'  Rust/Rayon: {"有効" if HAS_RUST else "無効（純Python）"}')
     print('=' * 60)
 
@@ -222,7 +283,8 @@ def selftest():
     print()
 
     t0 = time.time()
-    results = attack_plugboard(ct, language='english', top_results=3, verbose=True)
+    results = attack_plugboard(ct, language='english', mode=mode,
+                               top_results=3, verbose=True)
     el = time.time() - t0
 
     print()
@@ -240,14 +302,34 @@ def selftest():
               f'{100*cm/len(plaintext):.1f}%  ({el:.1f}s)')
 
 
-def run_attack(ciphertext, language='auto'):
-    cleaned = sum(1 for c in ciphertext.upper() if 'A' <= c <= 'Z')
+def prompt_mode():
+    """対話モードで探索モードを選ばせる。"""
+    modes = list(MODE_PARAMS)
     print()
-    print(f'文字数: {cleaned}  言語: {language}  '
+    print('探索モードを選んでください（精度と所要時間のトレードオフ）:')
+    for number, mode in enumerate(modes, start=1):
+        label, desc = MODE_LABELS[mode]
+        default_mark = '  ← 既定' if mode == DEFAULT_MODE else ''
+        print(f'  [{number}] {label}モード  {desc}{default_mark}')
+    try:
+        choice = input(f'選択 (1-{len(modes)}, 空欄で既定) > ').strip()
+    except (EOFError, KeyboardInterrupt):
+        return DEFAULT_MODE
+    by_number = {str(i): m for i, m in enumerate(modes, start=1)}
+    return by_number.get(choice, DEFAULT_MODE)
+
+
+def run_attack(ciphertext, language='auto', mode=DEFAULT_MODE):
+    cleaned = sum(1 for c in ciphertext.upper() if 'A' <= c <= 'Z')
+    label, desc = MODE_LABELS[mode]
+    print()
+    print(f'文字数: {cleaned}  言語: {language}  モード: {label}  '
           f'Rust: {"有効" if HAS_RUST else "無効"}')
-    print('（プラグボード未知からの最高精度解読。途中で止めるには Ctrl+C）')
+    print(f'（{desc} 途中で止めるには Ctrl+C）')
+    if not HAS_RUST:
+        print('注意: Rust コアが無効なため、目安時間より大幅に遅くなります。')
     print('=' * 60)
-    results = attack_plugboard(ciphertext, language=language,
+    results = attack_plugboard(ciphertext, language=language, mode=mode,
                                top_results=5, verbose=True)
     print()
     print('=' * 60)
@@ -268,22 +350,35 @@ def run_attack(ciphertext, language='auto'):
 
 def main():
     p = argparse.ArgumentParser(
-        description='エニグマ プラグボード未知 暗号文単独攻撃（段階スコア最高精度版）')
+        description='エニグマ プラグボード未知 暗号文単独攻撃（段階スコア・精度3モード）')
     p.add_argument('ciphertext', nargs='?',
                    help='復号する暗号文（A-Zのみ。空白等は無視）')
     p.add_argument('--lang', choices=['english', 'romaji', 'auto'], default=None)
+    p.add_argument('--mode', choices=list(MODE_PARAMS), default=None,
+                   help=f'探索モード（既定 {DEFAULT_MODE}）')
+    p.add_argument('--normal', action='store_true',
+                   help='通常モード（--mode normal と同じ、速いが粗い）')
+    p.add_argument('--thorough', action='store_true',
+                   help='徹底モード（--mode thorough と同じ、非常に遅い）')
     p.add_argument('--selftest', action='store_true', help='既知平文で動作確認')
     args = p.parse_args()
 
+    if args.thorough:
+        mode = 'thorough'
+    elif args.normal:
+        mode = 'normal'
+    else:
+        mode = args.mode  # None なら後で対話または既定で決める
+
     if args.selftest:
-        selftest()
+        selftest(mode or DEFAULT_MODE)
         return
 
     ciphertext = args.ciphertext
     interactive = ciphertext is None
     if interactive:
         print('=' * 60)
-        print('  エニグマ解読ツール（プラグボード未知・最高精度版）')
+        print('  エニグマ解読ツール（プラグボード未知）')
         print('=' * 60)
         print('暗号文を入力して Enter を押してください。')
         try:
@@ -295,8 +390,11 @@ def main():
             print('暗号文が入力されませんでした。終了します。')
             return
 
+    if mode is None:
+        mode = prompt_mode() if interactive else DEFAULT_MODE
+
     language = args.lang or 'auto'
-    run_attack(ciphertext, language=language)
+    run_attack(ciphertext, language=language, mode=mode)
 
 
 if __name__ == '__main__':

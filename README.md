@@ -13,30 +13,53 @@ enigma_breaker/
 ├── attack.py                    # Gillogly 二段階攻撃（通常・精度・徹底モード）
 ├── decrypt.py                   # コマンドラインエントリ（対話モード対応）
 ├── decrypt_known_plugboard.py   # プラグボード既知版解読ツール
-├── decrypt_plugboard.py         # プラグボード未知・最高精度版（段階スコア）
+├── decrypt_plugboard.py         # プラグボード未知版（段階スコア・精度3モード）
 ├── wordlist.py                  # 短文スコア用の英単語リスト（手選別・フォールバック）
 ├── wordlist_data.py             # 拡張英単語リスト（8800語, 自動生成）
 ├── ngrams_en.txt.gz             # 大規模コーパス由来の n-gram 頻度表（gzip 224KB）
-├── enigma_decoder/              # Rust + Rayon 高速コア（PyO3）
+├── enigma_decoder/              # Rust 解析コア（ネイティブ=PyO3+Rayon / ブラウザ=WASM）
 ├── web/                         # Next.js Web アプリ（生成機・復号機・解読機）
+├── tools/                       # Web 用データ生成・検証用の基準値生成
 └── README.md                    # このファイル
 ```
 
 ## Web アプリ (`web/`)
 
-Next.js（App Router / TypeScript）製の Web フロントエンド。詳細は `web/README.md`。
+Next.js（App Router / TypeScript）製。**解読を含めてすべてブラウザ内で完結する**ので
+静的ホスティング（Vercel 等）にそのまま載る。詳細は [`web/README.md`](web/README.md)。
 
 - **生成機・復号機**（`/machine`）: 内部状態を固定したエニグマで平文⇄暗号文を相互変換。
   エニグマを TypeScript に移植し（`AAAAA→BDZGO` で検証）ブラウザ内で即時実行。
-- **解読機**（`/break/known-plugboard`, `/break/plugboard`）: API ルートが本体の
-  Python + Rust 解読機を呼び出し、暗号文単独で設定を復元。
+- **解読機**（`/break/known-plugboard`, `/break/plugboard`）: Rust 解析コアを
+  WebAssembly 化し、CPU コア数ぶんの Web Worker で並列実行。暗号文はサーバーへ送らない。
 
 ```bash
 cd web && npm install && npm run dev   # http://localhost:3000
 ```
 
+## Rust 解析コア (`enigma_decoder/`)
+
+アルゴリズム本体は `src/core.rs` に集約し、2 つの入口を feature で切り替える。
+
+| feature | 用途 | 並列化 | ビルド |
+|---|---|---|---|
+| `python`（既定）| ローカル CLI | Rayon | `maturin build --release` |
+| `wasm` | ブラウザ | Web Worker（JS 側）| `cd web && npm run build:wasm` |
+
+同じコードなので結果は一致する。実際に、言語モデルのスコアは Python と WASM で
+完全一致することを `web/scripts/verify-wasm.mjs` で確認している。
+
+```bash
+# ネイティブ拡張のビルド（Python 3.14 では pyo3 0.22 が新しすぎると判断するため
+# 前方互換フラグが要る）
+cd enigma_decoder
+PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 maturin build --release
+pip install target/wheels/enigma_decoder-*.whl
+```
+
 純Python部分は外部依存ゼロ（標準ライブラリのみ）。Python 3.7+ で動作。
-Rust コア（`enigma_decoder`）はオプションで、ビルドすれば数十〜80倍高速化する。
+Rust コアはオプションで、未ビルドなら自動的に純Python版へフォールバックする
+（結果は同一、速度のみ異なる）。
 
 ## 精度を左右する言語モデル
 
@@ -72,10 +95,31 @@ Rust コア（`enigma_decoder`）はオプションで、ビルドすれば数�
 の**三段階スコアエスカレーション**を実装している。
 
 ```bash
-python decrypt_plugboard.py             # 対話モード
+python decrypt_plugboard.py             # 対話モード（暗号文と精度モードを尋ねる）
 python decrypt_plugboard.py --selftest  # 動作確認（155字・6ペアを復元）
 python decrypt_plugboard.py --lang english <暗号文>
+python decrypt_plugboard.py --normal   <暗号文>   # 速いが粗い
+python decrypt_plugboard.py --thorough <暗号文>   # 最大探索
 ```
+
+**精度モード**（`MODE_PARAMS` で定義。Web の「精度」セレクタと同じもの）:
+
+| モード | 目安時間 | Phase C の候補数 | リング探索 | 使いどころ |
+|---|---|---|---|---|
+| `normal` 通常 | 5〜30 秒 | 60（短文 90）| 26通り | 150字以上・0〜3ペア |
+| `accuracy` 精度（既定）| 20〜90 秒 | 200（短文 300）| 676通り | 迷ったらこれ |
+| `thorough` 徹底 | 5〜30 分 | 600（短文 900）| 676通り | 100字未満＋4ペア以上 |
+
+目安時間は Rust コアが有効な場合。未ビルドだと大幅に延びる。
+短文（150字未満）では正解が Phase A の上位から落ちやすいため、各モードの
+`width_scale` に比例して探索幅を自動拡大する。
+
+**Web 版とは探索幅が違う（意図的）**: CLI は Phase A の保持数（`top_n`）より
+Phase C の実行数（`max_candidates`）を小さく取っており、速度と引き換えに
+「捕捉できているのに評価されない候補」が出る。実測では 131字・3ペアで正解が
+Phase A の 537 位に居たが `max_candidates=200` に切られて失敗した（その候補だけを
+Phase C に通すと完全復元する）。ブラウザ版は実行時間の上限が無いため両者を
+1 本化して全候補を評価する。詳細は [`web/README.md`](web/README.md)。
 
 **解読フェーズ**:
 

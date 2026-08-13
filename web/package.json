@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "verify:wasm": "node scripts/verify-wasm.mjs"
   },
   "dependencies": {
     "next": "15.5.4",

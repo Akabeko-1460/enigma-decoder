@@ -1,0 +1,7 @@
+# wasm-pack が生成する成果物。Vercel のビルド環境には Rust が無いため、
+# JS グルーと型定義は「コミットする」必要がある（＝ここでは無視しない）。
+#
+# .wasm 本体だけは public/wasm/ 側を配信に使うので、この場所のコピーは除外する。
+# 再生成は web/ で `npm run build:wasm`（このファイルも書き直される）。
+enigma_decoder_bg.wasm
+package.json
