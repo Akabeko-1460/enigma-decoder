@@ -13,6 +13,7 @@ JSON を 1 行だけ出力する（進捗表示は verbose=False で抑制）。
       "language": "auto" | "english" | "romaji",
       "plugboard": "AB CD",      # known_plugboard のとき使用
       "accuracy": false,          # known_plugboard のとき: リング676通り探索
+      "level": "accuracy",       # plugboard のとき: normal | accuracy | thorough
       "top_results": 5
     }
 
@@ -20,6 +21,7 @@ JSON を 1 行だけ出力する（進捗表示は verbose=False で抑制）。
     {
       "ok": true,
       "rust": true/false,
+      "level": "accuracy",        # 実際に使われた精度レベル（plugboard のみ）
       "elapsed": 1.23,
       "results": [
          {"score":.., "rotors":"II IV V", "positions":"HEW",
@@ -87,6 +89,7 @@ def main():
         return
 
     t0 = time.time()
+    level = None
     try:
         if mode == "known_plugboard":
             import decrypt_known_plugboard as dk
@@ -99,8 +102,13 @@ def main():
             rust = dk.HAS_RUST
         elif mode == "plugboard":
             import decrypt_plugboard as dp
+            # 未知の値が来ても落とさず既定へ倒す（UI とサーバの版ズレ対策）
+            level = payload.get("level") or dp.DEFAULT_MODE
+            if level not in dp.MODE_PARAMS:
+                level = dp.DEFAULT_MODE
             results = dp.attack_plugboard(
-                ct, language=language, top_results=top_results, verbose=False)
+                ct, language=language, mode=level,
+                top_results=top_results, verbose=False)
             rust = dp.HAS_RUST
         else:
             print(json.dumps({"ok": False, "error": f"unknown mode: {mode}"}))
@@ -114,6 +122,7 @@ def main():
     print(json.dumps({
         "ok": True,
         "rust": bool(rust),
+        "level": level,
         "elapsed": round(time.time() - t0, 2),
         "results": serialize(results),
     }))

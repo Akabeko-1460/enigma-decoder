@@ -6,8 +6,8 @@ export default function Home() {
       <h1>Enigma Workbench</h1>
       <p className="sub">
         エニグマ M3（陸軍3ローター式・リフレクター B）の暗号を作って解く Web ツール。
-        暗号化・復号はブラウザ内で即時に、暗号文単独の解読は Python + Rust 製の
-        解析エンジンで実行します。
+        暗号化・復号も暗号文単独の解読も、すべてあなたのブラウザ内で完結します
+        （解析エンジンは Rust を WebAssembly 化したもの）。
       </p>
 
       <div className="hero-links">
@@ -22,14 +22,14 @@ export default function Home() {
           <h3>② 解読機（プラグボード既知）</h3>
           <p>
             プラグボード配線が判明している前提で、ローター・位置・リングを
-            暗号文だけから復元。Rust+Rayon 並列で高速。
+            暗号文だけから復元。数秒で終わります。
           </p>
         </Link>
         <Link href="/break/plugboard" className="card">
-          <h3>③ 解読機（プラグボード未知・最高精度）</h3>
+          <h3>③ 解読機（プラグボード未知）</h3>
           <p>
             全設定が未知の状態から、段階スコア（IC→bigram→trigram）で
-            プラグボードごと復元する最高精度モード。
+            プラグボードごと復元。精度を 3 段階から選べます。
           </p>
         </Link>
         <a
@@ -59,8 +59,8 @@ export default function Home() {
             <tr>
               <td className="k">解読（暗号解析）</td>
               <td>
-                Next.js API ルートが既存の Python 解読機（Rust/Rayon 高速コア）を
-                呼び出し、結果を返します。
+                Rust 製の解析コアを WebAssembly 化し、CPU コア数ぶんの Web Worker で
+                並列実行します。暗号文はサーバーへ送られません。
               </td>
             </tr>
             <tr>

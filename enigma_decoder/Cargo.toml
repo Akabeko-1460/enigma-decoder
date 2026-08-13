@@ -1,13 +1,33 @@
 [package]
 name = "enigma_decoder"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
 name = "enigma_decoder"
-crate-type = ["cdylib"]
+# cdylib: PyO3 拡張モジュール / wasm モジュールの両方に必要。
+# rlib:   ネイティブのユニットテスト（cargo test）から使うため。
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# 既定はローカル用の PyO3 + Rayon 版。既存の maturin ビルドはこのまま動く。
+# rand の std / std_rng はここでだけ有効にする（thread_rng を使うのはネイティブ版のみ）。
+default = ["python"]
+python = ["dep:pyo3", "dep:rayon", "rand/std", "rand/std_rng"]
+# ブラウザ向け。Rayon は使わず、並列化は JS 側の Web Worker プールが担う。
+wasm = ["dep:wasm-bindgen", "dep:serde", "dep:serde-wasm-bindgen"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module"] }
-rayon = "1.8"
-rand = { version = "0.8", features = ["small_rng"] }
+# default-features = false で getrandom を外す。wasm32-unknown-unknown では
+# getrandom がビルドできず、かつブラウザ版はシード固定の SmallRng しか使わない。
+rand = { version = "0.8", default-features = false, features = ["small_rng", "alloc"] }
+pyo3 = { version = "0.22", features = ["extension-module"], optional = true }
+rayon = { version = "1.8", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

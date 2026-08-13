@@ -1,0 +1,45 @@
+{
+  "note": "python tools/emit_score_reference.py で再生成",
+  "englishFloors": {
+    "bi": -8.592824494728012,
+    "tri": -8.59282438382078,
+    "quad": -8.592824272913518
+  },
+  "romajiFloors": {
+    "bi": -5.580696939712436,
+    "tri": -5.5805828768143675,
+    "quad": -5.580468783951002
+  },
+  "scores": [
+    {
+      "text": "THEENEMYFLEETHASBEENSPOTTEDNEARTHENORTHERNCOAST",
+      "lang": "english",
+      "score": -2.7708764052680364
+    },
+    {
+      "text": "MEETMEATTHEOLDBRIDGEATDAWNBRINGTHEDOCUMENTS",
+      "lang": "english",
+      "score": -2.8641343637977563
+    },
+    {
+      "text": "HELLOWORLDTHISISATEST",
+      "lang": "english",
+      "score": -2.7437305607793245
+    },
+    {
+      "text": "WATASHIWANIHONJINDESUKYOUWAIITENKIDESUNE",
+      "lang": "romaji",
+      "score": -2.6078388700624906
+    },
+    {
+      "text": "XQZWVKJYBPMHFCDLNRGTUSAOIEXQZWVKJYBPMHFCDLNRGTU",
+      "lang": "romaji",
+      "score": -5.440223029626577
+    },
+    {
+      "text": "THEQUICKBROWNFOXJUMPSOVERTHELAZYDOG",
+      "lang": "english",
+      "score": -3.8364303102659054
+    }
+  ]
+}
