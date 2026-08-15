@@ -10,10 +10,10 @@ import { searchParamsFor, type BreakLevel } from "../breakLevels";
 import { getPool, type SolverPool } from "./pool";
 import { RANKED_STRIDE, type WorkerTask } from "./protocol";
 import {
+  includesEnglish,
+  includesRomaji,
   rotorPermutations,
   textToInts,
-  useEnglish,
-  useRomaji,
   type Language,
   type Progress,
   type RankedRow,
@@ -197,8 +197,8 @@ export async function solvePlugboard(options: PlugboardSolveOptions): Promise<So
   const ct = textToInts(ciphertext);
   const params = searchParamsFor(level, ct.length);
   const sample = ct.slice(0, Math.min(MAX_SAMPLE_LEN, ct.length));
-  const useEn = useEnglish(language);
-  const useJa = useRomaji(language);
+  const useEn = includesEnglish(language);
+  const useJa = includesRomaji(language);
 
   onProgress?.({ phase: "init", done: 0, total: 1 });
   const pool = await getPool(useJa);
@@ -261,8 +261,8 @@ export async function solveKnownPlugboard(
 
   const ct = textToInts(ciphertext);
   const sample = ct.slice(0, Math.min(MAX_SAMPLE_LEN, ct.length));
-  const useEn = useEnglish(language);
-  const useJa = useRomaji(language);
+  const useEn = includesEnglish(language);
+  const useJa = includesRomaji(language);
 
   onProgress?.({ phase: "init", done: 0, total: 1 });
   const pool = await getPool(useJa);
