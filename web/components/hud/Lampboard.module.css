@@ -1,0 +1,53 @@
+/* ランプは 1 行最大 9 個。画面幅に応じて直径を変え、
+   狭い画面でも 9 個ぶんが 1 行に収まるようにする。 */
+.lampboard {
+  --gap: 5px;
+  --lamp: clamp(18px, 5.8vw, 26px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap);
+  padding: 12px 10px;
+  border: 1px solid var(--line-soft);
+  background:
+    radial-gradient(120% 130% at 50% 120%, rgba(34, 224, 255, 0.06), transparent 60%),
+    rgba(0, 0, 0, 0.45);
+}
+
+.row {
+  display: flex;
+  gap: var(--gap);
+}
+
+.lamp {
+  width: var(--lamp);
+  height: var(--lamp);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(34, 224, 255, 0.12);
+  border-radius: 50%;
+  background: #030b12;
+  color: var(--cyan-deep);
+  font-family: var(--mono);
+  font-size: calc(var(--lamp) * 0.46);
+  font-weight: 700;
+  /* 消灯はゆっくり、点灯は即時。実物の電球の余韻に寄せる */
+  transition: color 0.42s ease-out, background 0.42s ease-out, box-shadow 0.42s ease-out;
+}
+
+.lamp[data-lit="true"] {
+  color: #04131a;
+  background: var(--cyan);
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px var(--glow), 0 0 34px var(--glow-soft);
+  transition-duration: 0s;
+}
+
+@media (max-width: 420px) {
+  .lampboard {
+    --gap: 4px;
+    padding: 10px 6px;
+  }
+}
