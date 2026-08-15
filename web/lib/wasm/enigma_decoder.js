@@ -728,7 +728,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('enigma_decoder_bg.wasm', import.meta.url);
+        module_or_path = "/wasm/enigma_decoder_bg.wasm";
     }
     const imports = __wbg_get_imports();
 
