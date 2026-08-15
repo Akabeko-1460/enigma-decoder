@@ -1,0 +1,130 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  /* 遷移のたびに高さが跳ねないよう、本文とだいたい同じ高さを確保する */
+  min-height: 52vh;
+  padding: 40px 0;
+  text-align: center;
+}
+
+.dial {
+  width: clamp(76px, 20vw, 104px);
+  height: clamp(76px, 20vw, 104px);
+}
+
+/* SVG では transform-box を指定しないと、回転の中心がビューボックス原点になる */
+.dial circle {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* アルファベット環。アイコンと同じ 26 刻み */
+.ticks {
+  fill: none;
+  stroke: var(--cyan-deep);
+  stroke-width: 4;
+  stroke-dasharray: 1.6 4.68;
+  animation: dial-spin 9s linear infinite;
+}
+
+.ring {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 2;
+}
+
+.arc {
+  fill: none;
+  stroke: var(--cyan);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 34 92;
+  filter: drop-shadow(0 0 6px var(--glow));
+  animation: dial-spin 1.15s linear infinite reverse;
+}
+
+.hub {
+  fill: var(--cyan);
+  filter: drop-shadow(0 0 8px var(--glow));
+  animation: hub-pulse 1.6s ease-in-out infinite;
+}
+
+.label {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  color: var(--cyan);
+  text-shadow: 0 0 14px var(--glow-soft);
+}
+
+.note {
+  margin: -14px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* 進捗が読めないので、量ではなく「動いている」ことだけを見せる */
+.track {
+  position: relative;
+  width: min(320px, 72vw);
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.track::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34%;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  box-shadow: 0 0 14px var(--glow);
+  animation: track-sweep 1.25s ease-in-out infinite;
+}
+
+@keyframes dial-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes hub-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes track-sweep {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
+/*
+  モーション低減時はアニメーションが globals.css で一括停止される。
+  止まった位置のままだと帯が画面外に居て「読み込み中」に見えないので、
+  静止した状態でも意味が通る見た目に置き換える。
+*/
+@media (prefers-reduced-motion: reduce) {
+  .track::after {
+    width: 100%;
+    transform: none;
+    opacity: 0.45;
+  }
+}
