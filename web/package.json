@@ -12,7 +12,7 @@
     "verify:wasm": "node scripts/verify-wasm.mjs"
   },
   "dependencies": {
-    "next": "15.5.4",
+    "next": "15.5.23",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
@@ -22,7 +22,7 @@
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
     "eslint": "^9.39.5",
-    "eslint-config-next": "^15.5.4",
+    "eslint-config-next": "^15.5.23",
     "typescript": "5.7.2"
   }
 }
