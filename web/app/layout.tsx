@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Chakra_Petch, JetBrains_Mono, Orbitron } from "next/font/google";
+import AudioController from "@/components/hud/AudioController";
 import Backdrop from "@/components/hud/Backdrop";
 import StatusBar from "@/components/hud/StatusBar";
 import TopBar from "@/components/hud/TopBar";
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ja" className={`${display.variable} ${ui.variable} ${mono.variable}`}>
       <body>
         <Backdrop />
+        <AudioController />
         <TopBar />
         <main className="container">{children}</main>
         <StatusBar />

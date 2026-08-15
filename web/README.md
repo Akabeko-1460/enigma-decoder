@@ -44,6 +44,13 @@ Phase C は候補）をそのままワーカーへ配るので、分割の仕方
 **言語データ**（`public/data/`, 計 約250KB）は `python tools/build_web_assets.py` で生成。
 各ワーカーが起動時に読み込んで密配列を組む。
 
+**音**（`web/lib/audio/`）は音源ファイルを持たず、効果音も BGM も Web Audio API で
+その場で合成する（素材のライセンス確認が要らず、追加ダウンロードが 0 バイトで済む）。
+効果音はボタンごとに実装せず、`components/hud/AudioController.tsx` が文書全体の
+クリックを拾って要素の種類から音を選ぶ。自前で音を鳴らす要素には `data-sfx-silent`
+を付けて二重発音を避ける。ブラウザの自動再生方針により、実際に鳴り始めるのは
+ページ上で最初の操作があってから。
+
 **アイコン**（`app/icon.svg` ほか）は `scripts/build-icons.mjs` の生成物。
 図案を変えたらスクリプトを直して `npm run build:icons` で 3 ファイルとも作り直す。
 

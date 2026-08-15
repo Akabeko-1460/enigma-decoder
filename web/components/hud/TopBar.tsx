@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import SoundToggle from "./SoundToggle";
 
 /** 上部ナビ。用途 2 系統（通信 / 解読）が並びで分かるよう英名を主にしている。 */
 const NAV = [
@@ -37,6 +38,7 @@ export default function TopBar() {
             </Link>
           ))}
         </nav>
+        <SoundToggle />
       </div>
     </header>
   );

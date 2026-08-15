@@ -1,0 +1,90 @@
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 12px;
+  border: 1px solid var(--line-soft);
+  background: rgba(0, 0, 0, 0.32);
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  white-space: nowrap;
+  cursor: pointer;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  transition: color 0.18s, background 0.18s, border-color 0.18s, box-shadow 0.18s;
+}
+
+.toggle:hover {
+  color: var(--text);
+  border-color: var(--cyan-dim);
+  background: rgba(34, 224, 255, 0.07);
+}
+
+.toggle:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.toggle[data-on="true"] {
+  color: var(--cyan);
+  border-color: var(--line);
+  background: rgba(34, 224, 255, 0.09);
+  box-shadow: 0 0 16px var(--glow-soft);
+}
+
+/* 再生中を示すレベルメーター */
+.meter {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 13px;
+}
+
+.meter i {
+  width: 2px;
+  height: 100%;
+  background: currentColor;
+  transform: scaleY(0.2);
+  transform-origin: bottom;
+}
+
+.toggle[data-on="true"] .meter i {
+  box-shadow: 0 0 6px var(--glow-soft);
+  animation: sound-bars 0.9s ease-in-out infinite;
+  /* 隣どうしをずらして波打たせる */
+  animation-delay: calc(var(--bar) * 0.11s);
+}
+
+@keyframes sound-bars {
+  0%,
+  100% {
+    transform: scaleY(0.2);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* 幅が足りなくなったらメーターだけ残す */
+@media (max-width: 560px) {
+  .toggle {
+    gap: 0;
+    padding: 5px 9px;
+  }
+
+  .label {
+    display: none;
+  }
+}
+
+/*
+  モーション低減時はアニメーションが globals.css で一括停止される。
+  止まったままだと OFF と見分けが付かないので、静止した波形を代わりに置く。
+*/
+@media (prefers-reduced-motion: reduce) {
+  .toggle[data-on="true"] .meter i {
+    transform: scaleY(calc(0.3 + var(--bar) * 0.17));
+  }
+}
