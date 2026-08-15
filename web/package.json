@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "build:icons": "node scripts/build-icons.mjs",
     "build:wasm": "node scripts/build-wasm.mjs",
     "verify:wasm": "node scripts/verify-wasm.mjs"
   },

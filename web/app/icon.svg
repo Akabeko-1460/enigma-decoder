@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="ENIGMA">
+  <title>ENIGMA</title>
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d2434" />
+      <stop offset="1" stop-color="#04090f" />
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.38" stop-color="#22e0ff" stop-opacity="0" />
+      <stop offset="0.56" stop-color="#22e0ff" stop-opacity="0.26" />
+      <stop offset="0.82" stop-color="#22e0ff" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <path d="M14 0 H64 V50 L50 64 H0 V14 Z" fill="url(#plate)" />
+  <path d="M15.13 0.8 H63.2 V48.87 L48.87 63.2 H0.8 V15.13 Z" fill="none" stroke="#22e0ff" stroke-opacity="0.34" stroke-width="1.6" />
+  <circle cx="32" cy="32" r="32" fill="url(#halo)" />
+
+  <g fill="#22e0ff" fill-opacity="0.85">
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(0 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(13.85 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(27.69 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(41.54 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(55.38 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(69.23 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(83.08 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(96.92 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(110.77 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(124.62 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(138.46 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(152.31 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(166.15 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(180 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(193.85 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(207.69 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(221.54 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(235.38 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(249.23 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(263.08 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(276.92 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(290.77 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(304.62 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(318.46 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(332.31 32 32)" />
+    <rect x="31.15" y="9.2" width="1.7" height="3.3" transform="rotate(346.15 32 32)" />
+  </g>
+  <polygon points="32 8.2, 34.8 4.4, 29.2 4.4" fill="#7df4ff" />
+
+  <circle cx="32" cy="32" r="16.5" fill="none" stroke="#22e0ff" stroke-width="4.4" />
+  <circle cx="32" cy="32" r="9" fill="none" stroke="#22e0ff" stroke-opacity="0.5" stroke-width="1.4" />
+  <circle cx="32" cy="32" r="4.6" fill="#7df4ff" />
+</svg>

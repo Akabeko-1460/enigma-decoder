@@ -44,6 +44,9 @@ Phase C は候補）をそのままワーカーへ配るので、分割の仕方
 **言語データ**（`public/data/`, 計 約250KB）は `python tools/build_web_assets.py` で生成。
 各ワーカーが起動時に読み込んで密配列を組む。
 
+**アイコン**（`app/icon.svg` ほか）は `scripts/build-icons.mjs` の生成物。
+図案を変えたらスクリプトを直して `npm run build:icons` で 3 ファイルとも作り直す。
+
 ## 開発
 
 ```bash
@@ -52,6 +55,7 @@ npm run dev            # http://localhost:3000
 
 npm run build:wasm     # Rust → WASM（Rust ツールチェーンが要る。下記）
 npm run verify:wasm    # WASM が Python と同じ結果を出すか検証（ブラウザ不要）
+npm run build:icons    # アプリアイコンを再生成（図案を変えたときだけ）
 npm run build          # 本番ビルド
 ```
 
