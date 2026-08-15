@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
+    "build:icons": "node scripts/build-icons.mjs",
     "build:wasm": "node scripts/build-wasm.mjs",
     "verify:wasm": "node scripts/verify-wasm.mjs"
   },
@@ -16,9 +17,12 @@
     "react-dom": "19.1.1"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.6",
     "@types/node": "22.10.2",
     "@types/react": "19.1.1",
     "@types/react-dom": "19.1.1",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^15.5.4",
     "typescript": "5.7.2"
   }
 }

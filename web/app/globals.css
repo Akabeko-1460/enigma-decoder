@@ -274,27 +274,6 @@ a:hover {
   flex-wrap: wrap;
 }
 
-.topbar__logo {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-  font-family: var(--display);
-  font-weight: 900;
-  font-size: 19px;
-  letter-spacing: 0.16em;
-  color: var(--cyan);
-  text-shadow: 0 0 14px var(--glow);
-}
-
-.topbar__logo small {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.24em;
-  color: var(--text-faint);
-  text-shadow: none;
-}
-
 .topbar__nav {
   display: flex;
   gap: 6px;
@@ -1335,8 +1314,7 @@ select option {
     display: none;
   }
 
-  /* ロゴの副題とナビの日本語補助は畳む */
-  .topbar__logo small,
+  /* ナビの日本語補助は畳む */
   .topbar__link span {
     display: none;
   }

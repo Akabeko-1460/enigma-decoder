@@ -51,11 +51,15 @@ export const ROTOR_LABELS = ["I", "II", "III", "IV", "V"] as const;
 /** リフレクター B のインデックス（Rust 側 REFLECTORS の並び）。 */
 export const REFLECTOR_B = 0;
 
-export function useEnglish(language: Language): boolean {
+/*
+ * 「その言語設定で英語／ローマ字の採点を行うか」を返す述語。
+ * use... という名前は React フックと見分けが付かないので避けている。
+ */
+export function includesEnglish(language: Language): boolean {
   return language === "auto" || language === "english";
 }
 
-export function useRomaji(language: Language): boolean {
+export function includesRomaji(language: Language): boolean {
   return language === "auto" || language === "romaji";
 }
 

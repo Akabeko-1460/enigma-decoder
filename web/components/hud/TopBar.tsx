@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import SoundToggle from "./SoundToggle";
 
-/** 上部ナビ。用途 2 系統（通信 / 解読）が並びで分かるよう英名を主にしている。 */
+/**
+ * 上部ナビ。用途 2 系統（通信 / 解読）が並びで分かるよう英名を主にしている。
+ * ロゴは置かず、左端をナビ、右端を音量トグルにしている。
+ * トップへ戻る導線はナビの HOME が担う。
+ */
 const NAV = [
   { href: "/", en: "HOME", jp: "司令室" },
   { href: "/machine", en: "TRANSMIT", jp: "暗号通信" },
@@ -17,13 +22,6 @@ export default function TopBar() {
   return (
     <header className="topbar">
       <div className="topbar__inner">
-        <Link href="/" className="topbar__logo">
-          <span className="glitch" data-text="ENIGMA">
-            ENIGMA
-          </span>
-          <small>M3 CRYPTO TERMINAL</small>
-        </Link>
-        <div className="spacer" />
         <nav className="topbar__nav">
           {NAV.map((item) => (
             <Link
@@ -37,6 +35,8 @@ export default function TopBar() {
             </Link>
           ))}
         </nav>
+        <div className="spacer" />
+        <SoundToggle />
       </div>
     </header>
   );

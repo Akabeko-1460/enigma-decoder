@@ -1,5 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Chakra_Petch, JetBrains_Mono, Orbitron } from "next/font/google";
+import AudioController from "@/components/hud/AudioController";
 import Backdrop from "@/components/hud/Backdrop";
 import StatusBar from "@/components/hud/StatusBar";
 import TopBar from "@/components/hud/TopBar";
@@ -35,6 +36,13 @@ export const metadata: Metadata = {
   title: "ENIGMA // M3 CRYPTO TERMINAL",
   description:
     "エニグマ M3 の暗号を仲間と作って送り合い、暗号文だけを手がかりに解読する Web ターミナル。暗号化も解析もすべてブラウザ内で完結します。",
+  applicationName: "ENIGMA",
+};
+
+/** モバイルのブラウザ枠まで暗くして、画面の地色と繋げる。 */
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#03070b",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -42,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ja" className={`${display.variable} ${ui.variable} ${mono.variable}`}>
       <body>
         <Backdrop />
+        <AudioController />
         <TopBar />
         <main className="container">{children}</main>
         <StatusBar />
