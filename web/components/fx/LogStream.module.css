@@ -1,0 +1,50 @@
+.stream {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 168px;
+  padding: 10px 14px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  background: rgba(0, 0, 0, 0.5);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  line-height: 1.7;
+  /* 上端をフェードさせて「下から湧いて上へ抜ける」ように見せる */
+  mask-image: linear-gradient(180deg, transparent, #000 34%);
+}
+
+.line {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: log-in 0.22s ease-out;
+}
+
+.line[data-kind="trace"] {
+  color: var(--text-faint);
+}
+
+.line[data-kind="event"] {
+  color: var(--cyan);
+  text-shadow: 0 0 10px var(--glow-soft);
+}
+
+.marker {
+  flex: 0 0 auto;
+  opacity: 0.65;
+}
+
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

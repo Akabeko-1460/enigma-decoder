@@ -1,126 +1,1462 @@
+/* ==========================================================================
+   ENIGMA // M3 CRYPTO TERMINAL — デザインシステム
+
+   黒地にシアンのネオン。SF ゲームのシステム画面を模した HUD。
+   ここには「トークン」と「どのページでも使う素材」だけを置く。
+   個々の装置（ローター・プラグ盤など）の見た目は各 CSS Module に持たせる。
+
+   色は寒色のみで構成する: シアン（主）／ミント（成功）／バイオレット（警告・
+   エラー）。注意状態に暖色を使わず、彩度を落とすか点滅で区別する。
+
+   フォント変数（--font-display / --font-ui / --font-mono）は
+   app/layout.tsx の next/font から注入される。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. トークン
+   -------------------------------------------------------------------------- */
+
 :root {
-  --bg: #0e1116;
-  --panel: #171b22;
-  --panel-2: #1e232c;
-  --border: #2a313c;
-  --text: #e6e9ef;
-  --muted: #9aa4b2;
-  --accent: #4ea1ff;
-  --accent-2: #ffca57;
-  --good: #4ad07a;
-  --bad: #ff6b6b;
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  /* 地の色。void が最背面、deep がページ地 */
+  --void: #03070b;
+  --deep: #060d15;
+
+  /* パネル。半透明にして背面のグリッドを透かす */
+  --panel: rgba(9, 20, 31, 0.72);
+  --panel-hi: rgba(16, 34, 50, 0.85);
+  --panel-solid: #0a1621;
+
+  /* 主アクセント */
+  --cyan: #22e0ff;
+  --cyan-dim: #0f7f9b;
+  --cyan-deep: #0a4a5c;
+  --cyan-ink: #041219; /* シアン地の上に乗せる文字色 */
+  --glow: rgba(34, 224, 255, 0.45);
+  --glow-soft: rgba(34, 224, 255, 0.16);
+
+  /* 成功・確定 */
+  --mint: #66ffb2;
+  --mint-glow: rgba(102, 255, 178, 0.4);
+
+  /* 警告・エラー・中断。暖色を使わないぶんバイオレットで受ける */
+  --violet: #b06bff;
+  --violet-glow: rgba(176, 107, 255, 0.4);
+
+  /* 文字 */
+  --text: #d8f2fa;
+  --text-dim: #7fa3b4;
+  --text-faint: #4d6b7a;
+
+  /* 罫線・グリッド */
+  --line: rgba(34, 224, 255, 0.18);
+  --line-soft: rgba(34, 224, 255, 0.09);
+  --grid: rgba(34, 224, 255, 0.06);
+
+  /* 書体（next/font が未注入でも破綻しないようフォールバックを持たせる） */
+  --font-jp: "BIZ UDPGothic", "Yu Gothic", YuGothic, "Hiragino Sans",
+    "Noto Sans JP", sans-serif;
+  --display: var(--font-display), "Impact", sans-serif;
+  --ui: var(--font-ui), var(--font-jp), sans-serif;
+  --mono: var(--font-mono), ui-monospace, Consolas, monospace;
+
+  /* 角の落とし量。パネルとボタンで揃える。狭い画面では小さくする */
+  --cut: 16px;
+  --cut-sm: 9px;
+
+  /* レイアウトの基準値 */
+  --page-max: 1080px;
+  --page-pad: 24px;
+  --statusbar-h: 30px;
 }
 
-* { box-sizing: border-box; }
+/* --------------------------------------------------------------------------
+   2. リセットと基礎
+   -------------------------------------------------------------------------- */
 
-html, body {
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* 背面レイヤが body より下に来ないように地の色を持たせる */
+  background: var(--void);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
   margin: 0;
-  padding: 0;
-  background: var(--bg);
+  min-height: 100vh;
   color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
-    "Hiragino Sans", "Noto Sans JP", sans-serif;
-  line-height: 1.6;
+  background: transparent;
+  font-family: var(--ui);
+  font-size: 15px;
+  line-height: 1.75;
+  letter-spacing: 0.01em;
+  overflow-x: hidden;
+  /* 下端の固定ステータスバーに本文が潜り込まないように */
+  padding-bottom: var(--statusbar-h);
 }
 
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-.container { max-width: 960px; margin: 0 auto; padding: 24px 20px 80px; }
-
-header.site {
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(180deg, #12161d, #0e1116);
-}
-header.site .inner {
-  max-width: 960px; margin: 0 auto; padding: 16px 20px;
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-}
-header.site .logo { font-weight: 700; font-size: 18px; letter-spacing: 0.5px; }
-header.site nav { display: flex; gap: 14px; flex-wrap: wrap; }
-header.site nav a { color: var(--muted); font-size: 14px; }
-header.site nav a:hover { color: var(--text); text-decoration: none; }
-
-h1 { font-size: 26px; margin: 8px 0 4px; }
-h2 { font-size: 19px; margin: 28px 0 10px; }
-.sub { color: var(--muted); margin-top: 0; }
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  margin: 16px 0;
+img,
+svg {
+  max-width: 100%;
 }
 
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+a {
+  color: var(--cyan);
+  text-decoration: none;
+  transition: color 0.15s, text-shadow 0.15s;
+}
 
-label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+a:hover {
+  text-shadow: 0 0 10px var(--glow);
+}
 
-textarea, input[type="text"], select {
-  width: 100%;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 8px;
-  padding: 10px 12px;
+::selection {
+  background: var(--cyan);
+  color: var(--cyan-ink);
+}
+
+/* --------------------------------------------------------------------------
+   3. 背面レイヤ（components/hud/Backdrop.tsx）
+
+   5 枚重ねる。いずれも視差を作るだけなので pointer-events は殺す。
+   -------------------------------------------------------------------------- */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  background: var(--void);
+}
+
+.backdrop__layer {
+  position: absolute;
+  inset: 0;
+}
+
+/* (1) 上方向からの光害。画面上部にだけシアンが差す */
+.backdrop__glow {
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(34, 224, 255, 0.16), transparent 60%),
+    radial-gradient(90% 50% at 15% 105%, rgba(176, 107, 255, 0.06), transparent 60%),
+    linear-gradient(180deg, var(--deep), var(--void));
+}
+
+/* (2) パース付きのグリッド床。下半分を奥へ流す */
+.backdrop__grid {
+  top: 42%;
+  transform-origin: 50% 0;
+  transform: perspective(340px) rotateX(66deg) scale(2.4);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 56px 56px;
+  animation: grid-drift 6s linear infinite;
+  mask-image: linear-gradient(180deg, transparent, #000 22%, #000 55%, transparent 88%);
+}
+
+/* (3) ドットマトリクス。全面に薄く敷いて「計器盤」の質感を出す */
+.backdrop__dots {
+  background-image: radial-gradient(var(--grid) 1px, transparent 1px);
+  background-size: 26px 26px;
+  opacity: 0.7;
+}
+
+/* (4) 走査線 + 上から降りてくる明るい帯 */
+.backdrop__scan {
+  background: repeating-linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.35) 3px,
+    rgba(0, 0, 0, 0.35) 4px
+  );
+  opacity: 0.5;
+}
+
+.backdrop__sweep {
+  height: 42vh;
+  inset: auto 0 auto 0;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(34, 224, 255, 0.05) 45%,
+    rgba(34, 224, 255, 0.11) 50%,
+    rgba(34, 224, 255, 0.05) 55%,
+    transparent
+  );
+  animation: scan-sweep 9s linear infinite;
+}
+
+/* (5) ノイズ。feTurbulence を data-URI で焼き込む（外部通信なし） */
+.backdrop__noise {
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: noise-shift 0.7s steps(3) infinite;
+}
+
+/* --------------------------------------------------------------------------
+   4. ビューポート四隅のブラケット
+   -------------------------------------------------------------------------- */
+
+.viewframe {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.viewframe span {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--cyan-dim);
+  opacity: 0.55;
+}
+
+.viewframe span:nth-child(1) {
+  top: 10px;
+  left: 10px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.viewframe span:nth-child(2) {
+  top: 10px;
+  right: 10px;
+  border-left: 0;
+  border-bottom: 0;
+}
+.viewframe span:nth-child(3) {
+  bottom: calc(var(--statusbar-h) + 10px);
+  left: 10px;
+  border-right: 0;
+  border-top: 0;
+}
+.viewframe span:nth-child(4) {
+  bottom: calc(var(--statusbar-h) + 10px);
+  right: 10px;
+  border-left: 0;
+  border-top: 0;
+}
+
+/* --------------------------------------------------------------------------
+   5. レイアウト
+   -------------------------------------------------------------------------- */
+
+.container {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 32px var(--page-pad) 88px;
+}
+
+/* 上部 HUD バー */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(4, 12, 19, 0.94), rgba(4, 12, 19, 0.78));
+  backdrop-filter: blur(10px);
+}
+
+.topbar__inner {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 10px var(--page-pad);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.topbar__logo {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: 19px;
+  letter-spacing: 0.16em;
+  color: var(--cyan);
+  text-shadow: 0 0 14px var(--glow);
+}
+
+.topbar__logo small {
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  color: var(--text-faint);
+  text-shadow: none;
 }
-textarea { min-height: 110px; resize: vertical; }
 
-.row { display: flex; gap: 10px; flex-wrap: wrap; }
-.row > * { flex: 1; min-width: 80px; }
+.topbar__nav {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 
-button {
-  background: var(--accent);
-  color: #06213f;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 18px;
+.topbar__link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  font-family: var(--ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  color: var(--text-dim);
+  border: 1px solid transparent;
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  transition: color 0.18s, background 0.18s, border-color 0.18s;
+}
+
+.topbar__link::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  background: currentColor;
+  opacity: 0.55;
+  transform: rotate(45deg);
+}
+
+.topbar__link:hover {
+  color: var(--text);
+  background: rgba(34, 224, 255, 0.06);
+  text-shadow: none;
+}
+
+.topbar__link[data-active="true"] {
+  color: var(--cyan);
+  border-color: var(--line);
+  background: rgba(34, 224, 255, 0.1);
+  text-shadow: 0 0 10px var(--glow);
+}
+
+.topbar__link[data-active="true"]::before {
+  opacity: 1;
+  box-shadow: 0 0 8px var(--cyan);
+}
+
+/* 下部ステータスバー */
+.statusbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+  height: var(--statusbar-h);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 16px;
+  overflow: hidden;
+  white-space: nowrap;
+  border-top: 1px solid var(--line);
+  background: rgba(3, 8, 13, 0.94);
+  backdrop-filter: blur(8px);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+}
+
+.statusbar b {
+  color: var(--cyan-dim);
+  font-weight: 400;
+}
+
+.statusbar__spacer {
+  flex: 1;
+}
+
+/* 汎用グリッド */
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* --------------------------------------------------------------------------
+   6. タイポグラフィ
+   -------------------------------------------------------------------------- */
+
+/* 見出しの上に置く極小のラベル。HUD の「識別子」 */
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
   font-weight: 700;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--cyan-dim);
+}
+
+.eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line), transparent);
+}
+
+.display {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: clamp(40px, 11vw, 84px);
+  line-height: 0.95;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  text-shadow: 0 0 28px var(--glow-soft);
+}
+
+h1 {
+  margin: 0 0 6px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(21px, 5vw, 32px);
+  line-height: 1.2;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+h2 {
+  margin: 0 0 10px;
+  font-family: var(--ui);
+  font-weight: 600;
+  font-size: 17px;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+/* 見出し直下のリード文。
+   幅は制限しない。ch は半角「0」の幅なので、日本語に使うと体感の半分の
+   文字数で折り返してしまう（68ch ≒ 全角 34 文字）。下に並ぶパネルと
+   同じ幅まで使わせる。 */
+.sub {
+  margin: 0;
+  color: var(--text-dim);
   font-size: 14px;
+  /* 折り返すときは文節の切れ目で改行する（未対応ブラウザでは無視される） */
+  word-break: auto-phrase;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.muted {
+  color: var(--text-dim);
+}
+
+.faint {
+  color: var(--text-faint);
+}
+
+.ok {
+  color: var(--mint);
+}
+
+.alert {
+  color: var(--violet);
+}
+
+.small {
+  font-size: 13px;
+}
+
+.tiny {
+  font-size: 11.5px;
+}
+
+/* --------------------------------------------------------------------------
+   7. パネル（components/hud/Panel.tsx）
+
+   角を落とした 1px 枠を出すため、外側を枠色で塗り 1px の padding を挿し、
+   内側を地の色で塗る二重構造にしている（clip-path は border を切ってしまうため）。
+   -------------------------------------------------------------------------- */
+
+.hud-panel {
+  --edge: var(--line);
+  --edge-glow: transparent;
+  position: relative;
+  padding: 1px;
+  background: var(--edge);
+  clip-path: polygon(
+    var(--cut) 0,
+    100% 0,
+    100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%,
+    0 100%,
+    0 var(--cut)
+  );
+  filter: drop-shadow(0 0 14px var(--edge-glow));
+  transition: filter 0.25s, background 0.25s;
+}
+
+.hud-panel[data-tone="accent"] {
+  --edge: var(--cyan-dim);
+  --edge-glow: var(--glow-soft);
+}
+.hud-panel[data-tone="alert"] {
+  --edge: rgba(176, 107, 255, 0.55);
+  --edge-glow: rgba(176, 107, 255, 0.18);
+}
+.hud-panel[data-tone="ok"] {
+  --edge: rgba(102, 255, 178, 0.5);
+  --edge-glow: rgba(102, 255, 178, 0.16);
+}
+
+.hud-panel__frame {
+  background: linear-gradient(160deg, var(--panel-hi), var(--panel));
+  clip-path: polygon(
+    var(--cut) 0,
+    100% 0,
+    100% calc(100% - var(--cut)),
+    calc(100% - var(--cut)) 100%,
+    0 100%,
+    0 var(--cut)
+  );
+  height: 100%;
+}
+
+.hud-panel__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px 7px 22px;
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(34, 224, 255, 0.045);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cyan-dim);
+}
+
+.hud-panel__id {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  text-shadow: 0 0 10px var(--glow);
+}
+
+.hud-panel__label {
+  /* 幅が足りないときは見出しから先に詰める（識別子と状態は残す） */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* バーの余白を埋める斜めストライプ */
+.hud-panel__ticks {
+  flex: 1;
+  min-width: 12px;
+  height: 7px;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--line-soft) 0 1px,
+    transparent 1px 5px
+  );
+}
+
+.hud-panel__status {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+}
+
+.hud-panel__body {
+  padding: 20px 22px;
+}
+
+.hud-panel__body > :first-child {
+  margin-top: 0;
+}
+
+/* リンクとして使うパネル。ホバーで枠が発光する */
+a.hud-panel {
+  display: block;
+  color: inherit;
+}
+
+a.hud-panel:hover {
+  --edge: var(--cyan);
+  --edge-glow: var(--glow);
+  text-shadow: none;
+}
+
+/* LED インジケータ */
+.led {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.led[data-status="on"] {
+  background: var(--cyan);
+  color: var(--cyan);
+  animation: led-blink 2.4s ease-in-out infinite;
+}
+.led[data-status="ok"] {
+  background: var(--mint);
+  color: var(--mint);
+}
+.led[data-status="alert"] {
+  background: var(--violet);
+  color: var(--violet);
+  animation: led-blink 0.6s steps(2) infinite;
+}
+.led[data-status="off"] {
+  background: var(--cyan-deep);
+  color: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   8. ボタン
+   -------------------------------------------------------------------------- */
+
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 20px;
+  overflow: hidden;
+  border: 1px solid var(--cyan-dim);
+  background: rgba(34, 224, 255, 0.07);
+  color: var(--cyan);
+  font-family: var(--ui);
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  clip-path: polygon(
+    var(--cut-sm) 0,
+    100% 0,
+    100% calc(100% - var(--cut-sm)),
+    calc(100% - var(--cut-sm)) 100%,
+    0 100%,
+    0 var(--cut-sm)
+  );
+  transition: background 0.18s, color 0.18s, border-color 0.18s, box-shadow 0.18s,
+    transform 0.08s;
+}
+
+/* ホバーで内側を横切る光 */
+.btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 34%,
+    rgba(255, 255, 255, 0.3) 50%,
+    transparent 66%
+  );
+  transform: translateX(-130%);
+  transition: transform 0.55s ease;
+  pointer-events: none;
+}
+
+.btn:hover:not(:disabled)::after {
+  transform: translateX(130%);
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(34, 224, 255, 0.16);
+  border-color: var(--cyan);
+  box-shadow: 0 0 18px var(--glow-soft);
+  text-shadow: none;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: saturate(0.4);
+}
+
+.btn:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.btn--alert {
+  border-color: rgba(176, 107, 255, 0.6);
+  background: rgba(176, 107, 255, 0.1);
+  color: var(--violet);
+}
+
+.btn--alert:hover:not(:disabled) {
+  background: rgba(176, 107, 255, 0.2);
+  border-color: var(--violet);
+  box-shadow: 0 0 18px var(--violet-glow);
+}
+
+.btn--sm {
+  padding: 6px 13px;
+  font-size: 11px;
+  --cut-sm: 7px;
+}
+
+/* 実行ボタン。常時パルスして「押させたい」ことを示す */
+.btn--fire {
+  padding: 15px 36px;
+  font-family: var(--display);
+  font-size: 15px;
+  letter-spacing: 0.18em;
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: var(--cyan-ink);
+  animation: fire-pulse 2.2s ease-in-out infinite;
+}
+
+.btn--fire:disabled {
+  animation: none;
+}
+
+/* セグメント切替 */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+  clip-path: polygon(
+    var(--cut-sm) 0,
+    100% 0,
+    100% calc(100% - var(--cut-sm)),
+    calc(100% - var(--cut-sm)) 100%,
+    0 100%,
+    0 var(--cut-sm)
+  );
+}
+
+.segmented button {
+  padding: 8px 18px;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-family: var(--ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button[data-active="true"] {
+  background: var(--cyan);
+  color: var(--cyan-ink);
+  box-shadow: 0 0 16px var(--glow-soft);
+}
+
+/* --------------------------------------------------------------------------
+   9. 入力
+   -------------------------------------------------------------------------- */
+
+label {
+  display: block;
+  margin: 16px 0 6px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--cyan-dim);
+}
+
+textarea,
+input[type="text"],
+select {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.42);
+  color: var(--text);
+  font-family: var(--mono);
+  /* 16px 未満だと iOS がフォーカス時に拡大するため下限を守る */
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
+  clip-path: polygon(
+    var(--cut-sm) 0,
+    100% 0,
+    100% calc(100% - var(--cut-sm)),
+    calc(100% - var(--cut-sm)) 100%,
+    0 100%,
+    0 var(--cut-sm)
+  );
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--text-faint);
+  letter-spacing: 0.08em;
+}
+
+textarea:focus,
+input[type="text"]:focus,
+select:focus {
+  outline: 0;
+  border-color: var(--cyan);
+  background: rgba(34, 224, 255, 0.05);
+  box-shadow: 0 0 0 1px var(--cyan-deep), 0 0 20px var(--glow-soft) inset;
+}
+
+textarea {
+  min-height: 112px;
+  resize: vertical;
+  line-height: 1.85;
+}
+
+select {
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7'%3E%3Cpath d='M0 0h10L5 7z' fill='%2322e0ff'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+
+select option {
+  background: var(--panel-solid);
+  color: var(--text);
+}
+
+/* チェックボックス */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 0;
+  font-family: var(--ui);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--text-dim);
   cursor: pointer;
 }
-button:hover { filter: brightness(1.08); }
-button:disabled { opacity: 0.5; cursor: not-allowed; }
-button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--border); }
 
-.out {
-  background: #0b0e13;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
+.check input[type="checkbox"] {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--cyan-dim);
+  background: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.check input[type="checkbox"]:checked {
+  background: var(--cyan);
+  box-shadow: 0 0 12px var(--glow);
+}
+
+.check:hover {
+  color: var(--text);
+}
+
+/* --------------------------------------------------------------------------
+   10. データ表示
+   -------------------------------------------------------------------------- */
+
+/* 出力枠。暗号文・平文はここに出す */
+.readout {
+  padding: 14px 16px;
+  border: 1px solid var(--line-soft);
+  border-left: 2px solid var(--cyan-dim);
+  background: rgba(0, 0, 0, 0.45);
+  font-family: var(--mono);
+  font-size: clamp(13px, 3.2vw, 15px);
+  line-height: 1.9;
+  letter-spacing: 0.12em;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  min-height: 52px;
+  color: var(--cyan);
+  text-shadow: 0 0 12px var(--glow-soft);
+}
+
+.readout[data-empty="true"] {
+  color: var(--text-faint);
+  text-shadow: none;
+}
+
+.readout--lg {
+  font-size: clamp(14px, 3.6vw, 17px);
+  line-height: 2;
+}
+
+/* ラベル + 値 */
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stat__k {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.stat__v {
   font-family: var(--mono);
   font-size: 15px;
-  word-break: break-all;
-  white-space: pre-wrap;
-  min-height: 44px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--cyan);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
-.mono { font-family: var(--mono); }
-.muted { color: var(--muted); }
-.good { color: var(--good); }
-.bad { color: var(--bad); }
+
+.stat__v[data-tone="plain"] {
+  color: var(--text);
+}
+.stat__v[data-tone="ok"] {
+  color: var(--mint);
+}
+
+.statrow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 14px 20px;
+}
+
+/* キーと値の表 */
+.kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.kv td {
+  padding: 8px 10px;
+  border-bottom: 1px dashed var(--line-soft);
+  vertical-align: top;
+}
+
+.kv tr:last-child td {
+  border-bottom: 0;
+}
+
+.kv td.k {
+  width: 140px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.kv td.v {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* バッジ */
 .tag {
-  display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px;
-  background: var(--panel-2); border: 1px solid var(--border); color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  background: rgba(34, 224, 255, 0.06);
+  color: var(--cyan-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
 }
+
+.tag[data-tone="ok"] {
+  border-color: rgba(102, 255, 178, 0.4);
+  background: rgba(102, 255, 178, 0.08);
+  color: var(--mint);
+}
+.tag[data-tone="alert"] {
+  border-color: rgba(176, 107, 255, 0.4);
+  background: rgba(176, 107, 255, 0.08);
+  color: var(--violet);
+}
+
+/* 難易度の目盛り（components/hud/LevelMeter.tsx） */
+.levelmeter {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.levelmeter i {
+  width: 12px;
+  height: 8px;
+  background: var(--cyan-deep);
+  transform: skewX(-18deg);
+}
+
+.levelmeter i[data-lit="true"] {
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--glow-soft);
+}
+
+/* 進捗バー */
+.bar {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.bar__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan-deep), var(--cyan));
+  box-shadow: 0 0 14px var(--glow);
+  transition: width 0.35s ease;
+}
+
+.bar__fill::after {
+  content: "";
+  display: block;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(0, 0, 0, 0.25) 0 5px,
+    transparent 5px 10px
+  );
+  animation: bar-stripes 0.7s linear infinite;
+}
+
+/* --------------------------------------------------------------------------
+   11. 演出
+   -------------------------------------------------------------------------- */
+
+/* RGB ずれのグリッチ。data-text に同じ文字列を入れる */
+.glitch {
+  position: relative;
+  display: inline-block;
+}
+
+.glitch::before,
+.glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  clip-path: inset(0 0 0 0);
+}
+
+.glitch::before {
+  color: var(--violet);
+  animation: glitch-a 3.4s steps(1) infinite;
+}
+
+.glitch::after {
+  color: var(--cyan);
+  animation: glitch-b 2.7s steps(1) infinite;
+}
+
+/* 点滅キャレット */
+.caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--cyan);
+  box-shadow: 0 0 10px var(--glow);
+  animation: caret-blink 1s steps(2) infinite;
+}
+
+/* 回転スピナ */
 .spinner {
-  display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
-  border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
-  vertical-align: middle; margin-right: 6px;
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--cyan-deep);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
-table.kv { width: 100%; border-collapse: collapse; font-size: 14px; }
-table.kv td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-table.kv td.k { color: var(--muted); width: 130px; }
+/* --------------------------------------------------------------------------
+   12. キーフレーム
+   -------------------------------------------------------------------------- */
 
-.hero-links { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
-@media (max-width: 720px) { .hero-links { grid-template-columns: 1fr; } }
-.hero-links a.card { display: block; color: var(--text); }
-.hero-links a.card:hover { border-color: var(--accent); text-decoration: none; }
-.hero-links .card h3 { margin: 0 0 6px; font-size: 16px; }
-.hero-links .card p { margin: 0; color: var(--muted); font-size: 14px; }
+@keyframes grid-drift {
+  to {
+    background-position: 0 56px, 0 0;
+  }
+}
+
+@keyframes scan-sweep {
+  0% {
+    transform: translateY(-45vh);
+  }
+  100% {
+    transform: translateY(145vh);
+  }
+}
+
+@keyframes noise-shift {
+  0% {
+    transform: translate(0, 0);
+  }
+  33% {
+    transform: translate(-3%, 2%);
+  }
+  66% {
+    transform: translate(2%, -3%);
+  }
+  100% {
+    transform: translate(0, 0);
+  }
+}
+
+@keyframes led-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes fire-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 16px var(--glow-soft);
+  }
+  50% {
+    box-shadow: 0 0 34px var(--glow), 0 0 60px var(--glow-soft);
+  }
+}
+
+@keyframes bar-stripes {
+  to {
+    transform: translateX(-14px);
+  }
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* グリッチは「ほとんどの時間は無傷、たまに大きくずれる」ほうが機械らしい */
+@keyframes glitch-a {
+  0%,
+  92%,
+  100% {
+    opacity: 0;
+    transform: translate(0);
+  }
+  93% {
+    opacity: 0.85;
+    transform: translate(-3px, 1px);
+    clip-path: inset(12% 0 62% 0);
+  }
+  95% {
+    opacity: 0.85;
+    transform: translate(2px, -2px);
+    clip-path: inset(70% 0 8% 0);
+  }
+  97% {
+    opacity: 0;
+  }
+}
+
+@keyframes glitch-b {
+  0%,
+  88%,
+  100% {
+    opacity: 0;
+    transform: translate(0);
+  }
+  89% {
+    opacity: 0.8;
+    transform: translate(3px, -1px);
+    clip-path: inset(48% 0 26% 0);
+  }
+  91% {
+    opacity: 0.8;
+    transform: translate(-2px, 2px);
+    clip-path: inset(18% 0 55% 0);
+  }
+  93% {
+    opacity: 0;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   13. スクロールバー
+   -------------------------------------------------------------------------- */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cyan-deep) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+*::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--cyan-deep);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--cyan-dim);
+  background-clip: content-box;
+}
+
+/* --------------------------------------------------------------------------
+   14. レスポンシブ
+
+   段階は 4 つ。
+     ~1080px  余白を詰める
+     ~860px   2 カラムを 1 カラムへ（ホーム・通信卓）
+     ~640px   タブレット縦〜大きめの携帯。装飾を落とす
+     ~420px   携帯。角の落としと余白を最小に
+   -------------------------------------------------------------------------- */
+
+@media (max-width: 1080px) {
+  :root {
+    --page-pad: 20px;
+  }
+}
+
+@media (max-width: 860px) {
+  .container {
+    padding-top: 24px;
+  }
+
+  .topbar__inner {
+    gap: 12px;
+  }
+
+  .hud-panel__body {
+    padding: 16px 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --page-pad: 14px;
+    --cut: 12px;
+  }
+
+  body {
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  .container {
+    padding-bottom: 72px;
+  }
+
+  /* 四隅ブラケットは狭い画面では内容を圧迫するだけ */
+  .viewframe {
+    display: none;
+  }
+
+  /* ロゴの副題とナビの日本語補助は畳む */
+  .topbar__logo small,
+  .topbar__link span {
+    display: none;
+  }
+
+  .topbar__inner {
+    padding: 8px var(--page-pad);
+  }
+
+  .topbar__nav {
+    gap: 4px;
+  }
+
+  .topbar__link {
+    padding: 5px 9px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+  }
+
+  .hud-panel__bar {
+    padding-left: 16px;
+    gap: 8px;
+    letter-spacing: 0.14em;
+  }
+
+  .hud-panel__body {
+    padding: 14px;
+  }
+
+  /* 表は 2 段組みをやめて縦に積む */
+  .kv td {
+    display: block;
+    padding: 4px 0;
+    border-bottom: 0;
+  }
+
+  .kv td.k {
+    width: auto;
+    padding-top: 8px;
+  }
+
+  .kv tr {
+    display: block;
+    border-bottom: 1px dashed var(--line-soft);
+  }
+
+  .kv tr:last-child {
+    border-bottom: 0;
+  }
+
+  .btn--fire {
+    width: 100%;
+    padding: 14px 20px;
+  }
+
+  .segmented {
+    width: 100%;
+  }
+
+  .segmented button {
+    flex: 1;
+    padding: 9px 8px;
+  }
+
+  /* ステータスバーは横に流れないので、優先度の低い項目から畳む */
+  .statusbar [data-optional="1"] {
+    display: none;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --cut: 9px;
+    --cut-sm: 6px;
+  }
+
+  .statusbar {
+    gap: 12px;
+    padding: 0 10px;
+    font-size: 9.5px;
+    letter-spacing: 0.08em;
+  }
+
+  .statusbar [data-optional="2"] {
+    display: none;
+  }
+
+  .hud-panel__body {
+    padding: 12px;
+  }
+
+  .btn {
+    padding: 9px 14px;
+    font-size: 11.5px;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   15. モーション低減
+
+   常時演出が売りだが、OS 設定が優先。JS 側の演出も同じクエリを見て
+   最終状態へ即座に飛ばす（components/fx/useReducedMotion.ts）。
+   -------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .backdrop__sweep,
+  .backdrop__noise {
+    display: none;
+  }
+
+  .glitch::before,
+  .glitch::after {
+    display: none;
+  }
+}
