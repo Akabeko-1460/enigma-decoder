@@ -1,78 +1,110 @@
 import Link from "next/link";
+import BootSequence from "@/components/fx/BootSequence";
+import GlitchText from "@/components/fx/GlitchText";
+import LevelMeter from "@/components/hud/LevelMeter";
+import Panel from "@/components/hud/Panel";
+import StatRow from "@/components/hud/StatRow";
+import styles from "./home.module.css";
+
+/** CH.02 の入口。難易度順に並べる。 */
+const MISSIONS = [
+  {
+    href: "/break/known-plugboard",
+    name: "DECRYPT·01",
+    jp: "プラグボード既知",
+    level: 2,
+  },
+  {
+    href: "/break/plugboard",
+    name: "DECRYPT·02",
+    jp: "プラグボード未知",
+    level: 5,
+  },
+] as const;
 
 export default function Home() {
   return (
-    <div>
-      <h1>Enigma Workbench</h1>
-      <p className="sub">
-        エニグマ M3（陸軍3ローター式・リフレクター B）の暗号を作って解く Web ツール。
-        暗号化・復号も暗号文単独の解読も、すべてあなたのブラウザ内で完結します
-        （解析エンジンは Rust を WebAssembly 化したもの）。
-      </p>
+    <>
+      <BootSequence />
 
-      <div className="hero-links">
-        <Link href="/machine" className="card">
-          <h3>① 生成機・復号機（内部状態 固定）</h3>
-          <p>
-            あらかじめ固定した内部状態で、平文 → 暗号文、暗号文 → 平文を相互変換。
-            設定を知っていれば一瞬で復号できることを体験できます。
-          </p>
-        </Link>
-        <Link href="/break/known-plugboard" className="card">
-          <h3>② 解読機（プラグボード既知）</h3>
-          <p>
-            プラグボード配線が判明している前提で、ローター・位置・リングを
-            暗号文だけから復元。数秒で終わります。
-          </p>
-        </Link>
-        <Link href="/break/plugboard" className="card">
-          <h3>③ 解読機（プラグボード未知）</h3>
-          <p>
-            全設定が未知の状態から、段階スコア（IC→bigram→trigram）で
-            プラグボードごと復元。精度を 3 段階から選べます。
-          </p>
-        </Link>
-        <a
-          href="https://github.com/Akabeko-1460/enigma-decoder"
-          className="card"
-          target="_blank"
-          rel="noreferrer"
+      <section className={styles.hero}>
+        <p className="eyebrow">Enigma M3 · 3 rotors · Reflector B</p>
+        <h1 className="display">
+          <GlitchText>ENIGMA</GlitchText>
+        </h1>
+        <p className={styles.heroTag}>Crypto Terminal</p>
+        <p className="sub">
+          エニグマ M3 の暗号を作って送り合う通信卓と、暗号文だけから鍵を復元する解読機。暗号化も解析もブラウザ内で完結します。
+        </p>
+      </section>
+
+      <div className={styles.missions}>
+        <Panel
+          id="CH.01"
+          label="Transmit"
+          status="READY"
+          led="ok"
+          tone="accent"
+          href="/machine"
         >
-          <h3>リポジトリ</h3>
-          <p>
-            解析エンジン本体（Python + Rust/PyO3/Rayon）と、この Web アプリの
-            ソースコード。アルゴリズムの詳細は README を参照。
-          </p>
-        </a>
+          <div className={styles.mission}>
+            <h2 className={styles.missionTitle}>TRANSMIT</h2>
+            <p className={styles.missionJp}>暗号通信</p>
+            <p className={styles.missionBody}>
+              鍵（ローター・リング・初期位置・プラグボード）を組んで平文を暗号文に変えます。同じ鍵に通せば元に戻るので、鍵を相手に渡せばそのまま読めます。
+            </p>
+            <div className={styles.enter}>
+              <span>通信卓を開く</span>
+              <span>&rarr;</span>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel id="CH.02" label="Cryptanalysis" status="STANDBY" led="on" tone="accent">
+          <div className={styles.mission}>
+            <h2 className={styles.missionTitle}>DECRYPT</h2>
+            <p className={styles.missionJp}>暗号解読</p>
+            <p className={styles.missionBody}>
+              鍵を知らない状態から、暗号文だけで設定を割り出します。n-gram 頻度と英単語リストで平文らしさを採点し、候補を絞り込みます。
+            </p>
+            <div className={styles.levels}>
+              {MISSIONS.map((mission) => (
+                <Link key={mission.href} href={mission.href} className={styles.level}>
+                  <span className={styles.levelName}>{mission.name}</span>
+                  <span className={styles.levelJp}>{mission.jp}</span>
+                  <span className="spacer" />
+                  <LevelMeter value={mission.level} />
+                  <span className="mono">&rarr;</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </Panel>
       </div>
 
-      <h2>仕組み</h2>
-      <div className="card">
-        <table className="kv">
-          <tbody>
-            <tr>
-              <td className="k">暗号化 / 復号</td>
-              <td>
-                TypeScript 実装のエニグマをブラウザ内で実行（サーバー通信なし・即時）。
-              </td>
-            </tr>
-            <tr>
-              <td className="k">解読（暗号解析）</td>
-              <td>
-                Rust 製の解析コアを WebAssembly 化し、CPU コア数ぶんの Web Worker で
-                並列実行します。暗号文はサーバーへ送られません。
-              </td>
-            </tr>
-            <tr>
-              <td className="k">言語モデル</td>
-              <td>
-                約 390 万字のコーパスから作った n-gram 頻度表＋英単語リストで
-                「平文らしさ」を評価。
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div className={styles.spec}>
+        <Panel id="SYS" label="Specification">
+          <StatRow
+            items={[
+              { k: "実行場所", v: "IN-BROWSER" },
+              { k: "解析コア", v: "RUST → WASM" },
+              { k: "並列化", v: "WEB WORKERS" },
+              { k: "言語モデル", v: "3.9M CHARS" },
+              { k: "サーバー送信", v: "NONE", tone: "ok" },
+            ]}
+          />
+          <div className={styles.footer}>
+            <span>SOURCE</span>
+            <a
+              href="https://github.com/Akabeko-1460/enigma-decoder"
+              target="_blank"
+              rel="noreferrer"
+            >
+              github.com/Akabeko-1460/enigma-decoder
+            </a>
+          </div>
+        </Panel>
       </div>
-    </div>
+    </>
   );
 }
