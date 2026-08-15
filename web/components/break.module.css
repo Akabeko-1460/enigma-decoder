@@ -1,0 +1,248 @@
+/* 暗号文入力の頭。文字数チャージを右肩に置く */
+.intercept {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.interceptMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.charge {
+  padding-top: 6px;
+}
+
+/* 難易度タイル */
+.levels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.level {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--line-soft);
+  background: rgba(0, 0, 0, 0.32);
+  color: var(--text-dim);
+  cursor: pointer;
+  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, color 0.18s;
+}
+
+.level:hover:not(:disabled) {
+  border-color: var(--cyan-dim);
+  background: rgba(34, 224, 255, 0.07);
+  color: var(--text);
+}
+
+.level:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.level[data-active="true"] {
+  border-color: var(--cyan);
+  background: rgba(34, 224, 255, 0.13);
+  box-shadow: 0 0 22px var(--glow-soft);
+  color: var(--text);
+}
+
+.levelHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--ui);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text);
+}
+
+.levelEta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--cyan);
+}
+
+.level[data-active="false"] .levelEta {
+  color: var(--cyan-dim);
+}
+
+.levelHint {
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+/* 実行 */
+.launch {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+/* 実行中の HUD */
+.runHead {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.runElapsed {
+  font-family: var(--mono);
+  font-size: clamp(20px, 5vw, 26px);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--cyan);
+  text-shadow: 0 0 18px var(--glow-soft);
+}
+
+.runPhase {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.runCount {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+}
+
+/* ワーカーを LED セルで並べる */
+.workers {
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.worker {
+  width: 11px;
+  height: 16px;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--glow-soft);
+  animation: worker-flicker 0.9s ease-in-out infinite;
+}
+
+@keyframes worker-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.28;
+  }
+}
+
+/* 結果 */
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 4px;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: clamp(17px, 4.6vw, 28px);
+  letter-spacing: 0.08em;
+  color: var(--mint);
+  text-shadow: 0 0 26px var(--mint-glow);
+}
+
+.bannerBad {
+  color: var(--violet);
+  text-shadow: 0 0 26px var(--violet-glow);
+}
+
+.verdict {
+  display: flex;
+  gap: 22px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.verdictText {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* 復元された鍵 */
+.keyGroups {
+  display: flex;
+  gap: 26px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.keyGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.keyGroupLabel {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.keyDrums {
+  display: flex;
+  gap: 8px;
+}
+
+/* 次点候補 */
+.rank {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.rankNo {
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+/* ゲージは横に置けるうちだけ横。狭くなったら入力欄の下へ回す */
+@media (max-width: 620px) {
+  .intercept {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .charge {
+    align-self: center;
+    padding-top: 0;
+  }
+
+  .keyGroups {
+    gap: 16px;
+  }
+
+  .verdict {
+    gap: 16px;
+  }
+
+  .launch {
+    gap: 10px;
+  }
+}

@@ -1,0 +1,152 @@
+/* コマの高さと窓幅はここが持つ。RotorDrum.tsx は --index だけを渡す。
+   覗き窓は 3 コマ固定（中央が現在値）。 */
+.drum {
+  --accent: var(--cyan);
+  --row: 28px;
+  --width: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+
+.drum[data-tone="violet"] {
+  --accent: var(--violet);
+}
+.drum[data-tone="mint"] {
+  --accent: var(--mint);
+}
+
+/* 覗き窓 */
+.window {
+  position: relative;
+  width: var(--width);
+  height: calc(var(--row) * 3);
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #01080d, #041219 45%, #01080d);
+  box-shadow: inset 0 0 18px rgba(0, 0, 0, 0.9);
+}
+
+.window[data-editable="true"] {
+  cursor: pointer;
+}
+
+.window[data-editable="true"]:hover {
+  border-color: var(--accent);
+}
+
+.window:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --index 番目のコマを中央（上から 1 コマぶん下）へ寄せる */
+.strip {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(calc((1 - var(--index)) * var(--row)));
+  transition: transform 0.28s cubic-bezier(0.2, 0.9, 0.25, 1);
+  will-change: transform;
+}
+
+/* スロット風。回っているあいだだけ長く・ぶれさせる */
+.window[data-spinning="true"] .strip {
+  transition-duration: 0.72s;
+  transition-timing-function: cubic-bezier(0.16, 0.9, 0.2, 1);
+  filter: blur(0.6px);
+}
+
+.cell {
+  height: var(--row);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: calc(var(--row) * 0.54);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  transition: color 0.2s, text-shadow 0.2s;
+}
+
+.cell[data-current="true"] {
+  color: var(--accent);
+  text-shadow: 0 0 14px currentColor;
+}
+
+/* 上下を暗く落として中央のコマだけ読ませる。境目に細い線を 2 本引く */
+.glass {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(1, 6, 10, 0.92) 0%,
+      rgba(1, 6, 10, 0.1) 32%,
+      rgba(1, 6, 10, 0.1) 68%,
+      rgba(1, 6, 10, 0.92) 100%
+    ),
+    repeating-linear-gradient(180deg, transparent 0 2px, rgba(0, 0, 0, 0.35) 2px 3px);
+}
+
+.glass::before,
+.glass::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--line);
+}
+
+.glass::before {
+  top: var(--row);
+}
+
+.glass::after {
+  top: calc(var(--row) * 2);
+}
+
+.nudge {
+  width: var(--width);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--cyan-deep);
+  font-size: 9px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: color 0.15s, text-shadow 0.15s;
+}
+
+.nudge:hover {
+  color: var(--accent);
+  text-shadow: 0 0 8px currentColor;
+}
+
+.caption {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+@media (max-width: 640px) {
+  .drum {
+    --row: 24px;
+    --width: 44px;
+  }
+}
+
+@media (max-width: 400px) {
+  .drum {
+    --row: 21px;
+    --width: 38px;
+  }
+}

@@ -1,29 +1,50 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Chakra_Petch, JetBrains_Mono, Orbitron } from "next/font/google";
+import Backdrop from "@/components/hud/Backdrop";
+import StatusBar from "@/components/hud/StatusBar";
+import TopBar from "@/components/hud/TopBar";
 import "./globals.css";
 
+/**
+ * 書体は 3 系統。日本語は Google Fonts から取らない
+ * （next/font は日本語サブセットに対応せず全ウェイト取得になるため）。
+ * 日本語はシステムスタックに任せ、ラテン部分の書体で世界観を作る。
+ */
+const display = Orbitron({
+  subsets: ["latin"],
+  weight: ["700", "900"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+const ui = Chakra_Petch({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-ui",
+  display: "swap",
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  variable: "--font-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Enigma Workbench",
+  title: "ENIGMA // M3 CRYPTO TERMINAL",
   description:
-    "エニグマ M3 の暗号生成・復号と、暗号文単独の解読機（クリブなし）を備えた Web ツール。",
+    "エニグマ M3 の暗号を仲間と作って送り合い、暗号文だけを手がかりに解読する Web ターミナル。暗号化も解析もすべてブラウザ内で完結します。",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ja">
+    <html lang="ja" className={`${display.variable} ${ui.variable} ${mono.variable}`}>
       <body>
-        <header className="site">
-          <div className="inner">
-            <span className="logo">⚙︎ Enigma Workbench</span>
-            <nav>
-              <Link href="/">ホーム</Link>
-              <Link href="/machine">生成機・復号機</Link>
-              <Link href="/break/known-plugboard">解読: PB既知</Link>
-              <Link href="/break/plugboard">解読: PB未知</Link>
-            </nav>
-          </div>
-        </header>
+        <Backdrop />
+        <TopBar />
         <main className="container">{children}</main>
+        <StatusBar />
       </body>
     </html>
   );

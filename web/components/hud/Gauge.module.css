@@ -1,0 +1,61 @@
+.gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* 中央の数値を重ねるための基準 */
+.ring {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.track,
+.fill {
+  fill: none;
+  stroke-width: 5;
+  stroke-linecap: butt;
+}
+
+.track {
+  stroke: var(--cyan-deep);
+  opacity: 0.45;
+}
+
+.fill {
+  transition: stroke-dasharray 0.4s ease;
+}
+
+.ticks line {
+  stroke-width: 1.6;
+}
+
+/* 中央の数値。SVG の上に重ねる */
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.readout {
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-shadow: 0 0 12px currentColor;
+}
+
+.caption {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}

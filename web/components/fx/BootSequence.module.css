@@ -1,0 +1,75 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(80% 60% at 50% 40%, #061019, #010407 75%);
+  transition: opacity 0.42s ease, transform 0.42s ease;
+}
+
+.overlay[data-fading="true"] {
+  opacity: 0;
+  transform: scale(1.04);
+  pointer-events: none;
+}
+
+.console {
+  width: min(560px, 100%);
+}
+
+.title {
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: clamp(30px, 7vw, 46px);
+  letter-spacing: 0.2em;
+  color: var(--cyan);
+  text-shadow: 0 0 30px var(--glow);
+}
+
+.sub {
+  margin-bottom: 22px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.28em;
+  color: var(--text-faint);
+}
+
+.lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  line-height: 2;
+  color: var(--text-dim);
+}
+
+.lines li {
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lines li[data-shown="true"] {
+  opacity: 1;
+  transform: none;
+}
+
+.lines span {
+  color: var(--cyan);
+}
+
+.percent {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  color: var(--cyan-dim);
+}

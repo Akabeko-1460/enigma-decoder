@@ -1,0 +1,146 @@
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.stage {
+  padding: 14px 12px 8px;
+  border: 1px solid var(--line-soft);
+  background:
+    radial-gradient(120% 130% at 50% 0%, rgba(34, 224, 255, 0.05), transparent 65%),
+    rgba(0, 0, 0, 0.42);
+}
+
+/* 盤は比率で組む。幅いっぱいに広がるが、大画面で間延びしないよう上限を置く */
+.grid {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+/* ケーブルはソケットの下に敷く */
+.cables {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.cable {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 5px currentColor);
+  animation: cable-in 0.3s ease-out;
+}
+
+@keyframes cable-in {
+  from {
+    opacity: 0;
+    stroke-width: 5;
+  }
+  to {
+    opacity: 0.85;
+    stroke-width: 2.2;
+  }
+}
+
+.socket {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, #071723, #030b12);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: clamp(11px, 3.2vw, 13px);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  clip-path: polygon(5px 0, 100% 0, 100% calc(100% - 5px), calc(100% - 5px) 100%, 0 100%, 0 5px);
+  transition: color 0.15s, border-color 0.15s, background 0.15s, box-shadow 0.15s,
+    transform 0.1s;
+}
+
+.socket[data-editable="true"] {
+  cursor: pointer;
+}
+
+.socket[data-editable="true"]:hover {
+  color: var(--text);
+  border-color: var(--cyan-dim);
+  background: rgba(34, 224, 255, 0.1);
+}
+
+.socket:active {
+  transform: scale(0.94);
+}
+
+.socket[data-wired="true"] {
+  color: var(--cyan-ink);
+  background: var(--cyan);
+  border-color: var(--cyan);
+  box-shadow: 0 0 14px var(--glow);
+}
+
+/* 掴んでいる 1 本目。接続先待ちであることを点滅で示す */
+.socket[data-armed="true"] {
+  color: var(--violet);
+  border-color: var(--violet);
+  background: rgba(176, 107, 255, 0.18);
+  box-shadow: 0 0 16px var(--violet-glow);
+  animation: socket-armed 0.8s ease-in-out infinite;
+}
+
+@keyframes socket-armed {
+  50% {
+    box-shadow: 0 0 4px var(--violet-glow);
+  }
+}
+
+.socket:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+}
+
+.count {
+  color: var(--cyan);
+  font-weight: 700;
+}
+
+.count[data-full="true"] {
+  color: var(--violet);
+}
+
+.hint {
+  color: var(--text-faint);
+  letter-spacing: 0.06em;
+  font-family: var(--ui);
+  font-size: 11.5px;
+}
+
+@media (max-width: 420px) {
+  .stage {
+    padding: 10px 8px 6px;
+  }
+
+  .socket {
+    clip-path: polygon(3px 0, 100% 0, 100% calc(100% - 3px), calc(100% - 3px) 100%, 0 100%, 0 3px);
+  }
+}
