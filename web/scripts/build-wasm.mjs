@@ -21,6 +21,7 @@ const CRATE = path.resolve(WEB, "..", "enigma_decoder");
 const OUT_DIR = path.join(WEB, "lib", "wasm");
 const PUBLIC_WASM = path.join(WEB, "public", "wasm");
 const WASM_NAME = "enigma_decoder_bg.wasm";
+const PUBLIC_WASM_URL = `/wasm/${WASM_NAME}`;
 
 /**
  * wasm-pack は毎回 out-dir に「全部無視」の .gitignore を書く。
@@ -45,6 +46,31 @@ execFileSync(
 fs.mkdirSync(PUBLIC_WASM, { recursive: true });
 fs.copyFileSync(path.join(OUT_DIR, WASM_NAME), path.join(PUBLIC_WASM, WASM_NAME));
 fs.writeFileSync(path.join(OUT_DIR, ".gitignore"), GITIGNORE);
+patchDefaultWasmUrl();
+
+/**
+ * グルーが持つ「引数を省略したときの既定値」を、配信 URL の文字列に差し替える。
+ *
+ * wasm-pack はそこに `new URL(WASM_NAME, import.meta.url)` を書く。呼び出し側は
+ * 必ずパスを渡すのでこの式は実行されないが、webpack は new URL(..., import.meta.url)
+ * を「バンドルすべき資産」と見なしてビルド時に解決しようとする。.wasm 本体は
+ * public/ 側だけをコミットしているため、そのままだとクローン直後の環境
+ * （Vercel を含む）で Module not found になりビルドが落ちる。
+ */
+function patchDefaultWasmUrl() {
+  const gluePath = path.join(OUT_DIR, "enigma_decoder.js");
+  const glue = fs.readFileSync(gluePath, "utf8");
+  const defaultExpr = `new URL('${WASM_NAME}', import.meta.url)`;
+
+  if (!glue.includes(defaultExpr)) {
+    throw new Error(
+      `${gluePath} に ${defaultExpr} が見つかりません。` +
+        "wasm-pack の出力形式が変わった可能性があります。手で確認してください。"
+    );
+  }
+
+  fs.writeFileSync(gluePath, glue.replace(defaultExpr, JSON.stringify(PUBLIC_WASM_URL)));
+}
 
 const sizeKb = (fs.statSync(path.join(PUBLIC_WASM, WASM_NAME)).size / 1024).toFixed(1);
 console.log(`\npublic/wasm/${WASM_NAME} を更新しました (${sizeKb} KB)`);
