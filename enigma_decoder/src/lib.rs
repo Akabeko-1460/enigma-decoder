@@ -380,9 +380,9 @@ mod python_bindings {
         Ok(results)
     }
 
-    /// Phase C を手法を選んで実行する（手法比較用）。
+    /// Phase C を手法を選んで実行する（GA のオプトインと手法比較用）。
     ///
-    /// method: "current"（既定の段階スコア HC＋SA）/ "hc" / "sa"
+    /// method: "current"（既定の段階スコア HC＋SA）/ "hc" / "sa" / "ga"
     /// budgets: 候補ごとの適応度評価の上限。None なら無制限（"current" のみ可）。
     /// 戻り値の最後の要素は、その候補で実際に使った評価回数。
     #[pyfunction]
@@ -393,6 +393,8 @@ mod python_bindings {
         ja_tri, ja_tri_floor, ja_quad, ja_quad_floor,
         max_pairs, method, budgets=None, run_seed=0,
         n_restarts=4, sa_steps=40000, t_start=12.0, t_end=0.3,
+        ga_pop=None, ga_elite=None, ga_tournament=None,
+        ga_crossover=None, ga_mutation=None, ga_staged=None, ga_polish=None,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn phase2_optimize(
@@ -421,11 +423,18 @@ mod python_bindings {
         sa_steps: usize,
         t_start: f64,
         t_end: f64,
+        ga_pop: Option<usize>,
+        ga_elite: Option<usize>,
+        ga_tournament: Option<usize>,
+        ga_crossover: Option<f64>,
+        ga_mutation: Option<f64>,
+        ga_staged: Option<bool>,
+        ga_polish: Option<f64>,
     ) -> PyResult<Vec<(f64, [usize; 3], [u8; 3], [u8; 26], u64)>> {
         use pyo3::exceptions::PyValueError;
 
         let optimizer = PlugboardOptimizer::from_name(method).ok_or_else(|| {
-            PyValueError::new_err(format!("unknown method: {method} (current/hc/sa)"))
+            PyValueError::new_err(format!("unknown method: {method} (current/hc/sa/ga)"))
         })?;
         match &budgets {
             None if optimizer != PlugboardOptimizer::Current => {
@@ -442,7 +451,17 @@ mod python_bindings {
             return Err(PyValueError::new_err("max_pairs must be at least 3"));
         }
 
-        let params = Phase2Params { max_pairs, n_restarts, sa_steps, t_start, t_end };
+        let defaults = GaParams::default();
+        let ga = GaParams {
+            pop_size: ga_pop.unwrap_or(defaults.pop_size),
+            elite: ga_elite.unwrap_or(defaults.elite),
+            tournament: ga_tournament.unwrap_or(defaults.tournament),
+            crossover_rate: ga_crossover.unwrap_or(defaults.crossover_rate),
+            mutation_rate: ga_mutation.unwrap_or(defaults.mutation_rate),
+            staged: ga_staged.unwrap_or(defaults.staged),
+            polish_frac: ga_polish.unwrap_or(defaults.polish_frac),
+        };
+        let params = Phase2Params { max_pairs, n_restarts, sa_steps, t_start, t_end, ga };
 
         let ngrams = NgramArgs { en_tri, en_tri_floor, en_quad, en_quad_floor,
                                  ja_tri, ja_tri_floor, ja_quad, ja_quad_floor };
