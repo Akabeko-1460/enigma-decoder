@@ -40,8 +40,11 @@ from itertools import permutations
 try:
     import enigma_decoder as _ed
     HAS_RUST = hasattr(_ed, 'phase2_staged')
+    # GA（--optimizer ga）は phase2_optimize を含む新しいビルドでだけ使える
+    HAS_OPTIMIZE = hasattr(_ed, 'phase2_optimize')
 except ImportError:
     HAS_RUST = False
+    HAS_OPTIMIZE = False
 
 from enigma import Enigma, decrypt_with_settings
 from scoring import english_model, romaji_model, best_language_score_short
@@ -74,6 +77,22 @@ MODE_LABELS = {
     'accuracy': ('精度', '目安 20〜90 秒。既定。短文でも探索幅を自動拡大する。'),
     'thorough': ('徹底', '目安 5〜30 分。極短文・多プラグ向け。Web からは非推奨。'),
 }
+
+# Phase C の最適化手法。
+#   staged … 既定。段階スコア山登り（マルチスタート）＋SA 磨き上げ
+#   ga     … 遺伝的アルゴリズム（オプトイン。Rust コアの phase2_optimize が必要）
+OPTIMIZERS = ('staged', 'ga')
+DEFAULT_OPTIMIZER = 'staged'
+
+# GA に与える候補あたりの適応度評価回数を、現行と同程度にするための見積もり。
+# 実測で段階スコア山登り 1 回 ≈ 7,000 回、SA 磨き上げ ≈ sa_steps 回だった
+# （docs/optimizer-comparison.md）。
+_EVALS_PER_STAGED_CLIMB = 7000
+
+
+def ga_budget_per_candidate(params):
+    """現行の Phase C と同程度になる、GA の候補あたり評価回数。"""
+    return (1 + params['n_restarts']) * _EVALS_PER_STAGED_CLIMB + params['sa_steps']
 
 
 def _scale_params_for_length(params, ct_len):
@@ -134,6 +153,61 @@ def phase2_staged_rust(ciphertext, candidates, language='auto',
         max_pairs, n_restarts, sa_steps, t_start, t_end,
     )
 
+    results = _decode_phase_c(ct_ints, raw)
+    if verbose:
+        print(f'[Phase C] 完了 ({time.time()-t0:.1f}s)')
+    return results
+
+
+def phase2_optimize_rust(ciphertext, candidates, method, language='auto',
+                         max_candidates=200, max_pairs=10, n_restarts=4,
+                         sa_steps=40000, t_start=12.0, t_end=0.3,
+                         budgets=None, run_seed=0, ga_params=None, verbose=True):
+    """
+    Phase C を手法を選んで実行する（Rust + Rayon 並列）。
+
+    method:  'current'（phase2_staged_rust と同じ探索）/ 'hc' / 'sa' / 'ga'
+    budgets: 候補ごとの適応度評価回数の上限（'current' 以外は必須）
+    run_seed: 乱数シード。0 なら既定の解読と同じ乱数列になる。
+    ga_params: GA のパラメータ上書き（例 {'ga_pop': 64}）。
+
+    戻り値: (phase2_staged_rust と同じ形式の結果リスト,
+             候補の並び順どおりの評価回数リスト)
+    """
+    ct_ints = text_to_ints(ciphertext)
+    n = min(len(candidates), max_candidates)
+    en = english_model()
+    ja = romaji_model()
+    use_en = language in ('auto', 'english')
+    use_ja = language in ('auto', 'romaji')
+
+    rust_cands = [([_ROTOR_IDX[r] for r in c[1]], list(c[2])) for c in candidates[:n]]
+    if budgets is not None:
+        budgets = list(budgets)[:n]
+
+    t0 = time.time()
+    if verbose:
+        print(f'[Phase C] 最適化手法 {method} on {n} candidates [Rust+Rayon 並列]')
+
+    raw = _ed.phase2_optimize(
+        ct_ints, rust_cands, 0, use_en, use_ja,
+        en.bi_array, en.bi_floor, ja.bi_array, ja.bi_floor,
+        en.tri_array, en.tri_floor, en.quad_array, en.quad_floor,
+        ja.tri_array, ja.tri_floor, ja.quad_array, ja.quad_floor,
+        max_pairs, method, budgets, run_seed,
+        n_restarts, sa_steps, t_start, t_end,
+        **(ga_params or {}),
+    )
+    evals = [r[4] for r in raw]
+
+    results = _decode_phase_c(ct_ints, [r[:4] for r in raw])
+    if verbose:
+        print(f'[Phase C] 完了 ({time.time()-t0:.1f}s, 評価 {sum(evals):,} 回)')
+    return results, evals
+
+
+def _decode_phase_c(ct_ints, raw):
+    """Rust の Phase C 出力を復号して最終スコア付きの結果リストにし、降順に並べる。"""
     results = []
     for score, r_idx, p_idx, pb in raw:
         rotors = (ROTOR_NAMES[r_idx[0]], ROTOR_NAMES[r_idx[1]], ROTOR_NAMES[r_idx[2]])
@@ -142,9 +216,6 @@ def phase2_staged_rust(ciphertext, candidates, language='auto',
         text = ints_to_text(dec)
         lang, final = best_language_score_short(text)
         results.append((final, rotors, pos, (0, 0, 0), list(pb), lang, text))
-
-    if verbose:
-        print(f'[Phase C] 完了 ({time.time()-t0:.1f}s)')
     results.sort(reverse=True, key=lambda r: r[0])
     return results
 
@@ -202,15 +273,31 @@ def _dedupe(results, top_results):
     return unique
 
 
+def resolve_params(mode, ct_len, **overrides):
+    """モードと暗号文長から探索パラメータを決め、None でない overrides で上書きする。"""
+    params = _scale_params_for_length(MODE_PARAMS[mode], ct_len)
+    params.update({k: v for k, v in overrides.items() if v is not None})
+    return params
+
+
+def finish_results(ciphertext, results, refine_accuracy, top_results=5, verbose=True):
+    """Phase C の結果の重複を除き、Phase B（リング設定の再探索）を掛けて上位を返す。"""
+    results = _dedupe(results, top_results)
+    results = refine_rings(ciphertext, results, accuracy=refine_accuracy, verbose=verbose)
+    return _dedupe(results, top_results)
+
+
 def attack_plugboard(ciphertext, language='auto', mode=DEFAULT_MODE,
                      top_results=5, sample_len=None, max_pairs=10,
                      top_n=None, max_candidates=None, n_restarts=None,
-                     sa_steps=None, refine_accuracy=None, verbose=True):
+                     sa_steps=None, refine_accuracy=None,
+                     optimizer=DEFAULT_OPTIMIZER, verbose=True):
     """
     プラグボード未知の完全解読シーケンス。上位 top_results 候補を返す。
 
     mode で探索の広さ（＝精度と所要時間のトレードオフ）を選ぶ。
     個別パラメータを明示すればモードの既定値を上書きできる。
+    optimizer='ga' で Phase C を遺伝的アルゴリズムに差し替える（オプトイン）。
 
     Phase A: phase1 で IC ベースにローター・位置を全探索（既存 attack.phase1）
     Phase C: 三段階スコアでプラグボードを復元
@@ -219,6 +306,11 @@ def attack_plugboard(ciphertext, language='auto', mode=DEFAULT_MODE,
     """
     if mode not in MODE_PARAMS:
         raise ValueError(f'unknown mode: {mode} (expected one of {list(MODE_PARAMS)})')
+    if optimizer not in OPTIMIZERS:
+        raise ValueError(f'unknown optimizer: {optimizer} (expected one of {list(OPTIMIZERS)})')
+    if optimizer == 'ga' and not HAS_OPTIMIZE:
+        raise RuntimeError('optimizer=ga には phase2_optimize を含む Rust コアが必要です。'
+                           'README の手順で enigma_decoder をビルドし直してください。')
 
     ct_ints = text_to_ints(ciphertext)
     ct_len = len(ct_ints)
@@ -227,18 +319,22 @@ def attack_plugboard(ciphertext, language='auto', mode=DEFAULT_MODE,
     if sample_len is None:
         sample_len = min(200, ct_len)
 
-    params = _scale_params_for_length(MODE_PARAMS[mode], ct_len)
-    overrides = dict(top_n=top_n, max_candidates=max_candidates,
-                     n_restarts=n_restarts, sa_steps=sa_steps,
-                     refine_accuracy=refine_accuracy)
-    params.update({k: v for k, v in overrides.items() if v is not None})
+    params = resolve_params(mode, ct_len, top_n=top_n, max_candidates=max_candidates,
+                            n_restarts=n_restarts, sa_steps=sa_steps,
+                            refine_accuracy=refine_accuracy)
 
     # --- Phase A: ローター順＋初期位置 ---
     candidates = phase1(ciphertext, top_n=params['top_n'], sample_len=sample_len,
                         language=language, verbose=verbose)
 
-    # --- Phase C: プラグボード復元（段階スコア） ---
-    if HAS_RUST:
+    # --- Phase C: プラグボード復元（既定は段階スコア） ---
+    if optimizer == 'ga':
+        n_cands = min(len(candidates), params['max_candidates'])
+        results, _ = phase2_optimize_rust(
+            ciphertext, candidates, 'ga', language=language,
+            max_candidates=n_cands, max_pairs=max_pairs,
+            budgets=[ga_budget_per_candidate(params)] * n_cands, verbose=verbose)
+    elif HAS_RUST:
         results = phase2_staged_rust(
             ciphertext, candidates, language=language,
             max_candidates=params['max_candidates'], max_pairs=max_pairs,
@@ -250,21 +346,19 @@ def attack_plugboard(ciphertext, language='auto', mode=DEFAULT_MODE,
             max_candidates=min(params['max_candidates'], 60), max_pairs=max_pairs,
             n_restarts=params['n_restarts'], verbose=verbose)
 
-    results = _dedupe(results, top_results)
-
     # --- Phase B: リング設定の再探索（既存の refine を流用） ---
-    results = refine_rings(ciphertext, results,
-                           accuracy=params['refine_accuracy'], verbose=verbose)
-    results = _dedupe(results, top_results)
-    return results
+    return finish_results(ciphertext, results, params['refine_accuracy'],
+                          top_results=top_results, verbose=verbose)
 
 
-def selftest(mode=DEFAULT_MODE):
+def selftest(mode=DEFAULT_MODE, optimizer=DEFAULT_OPTIMIZER):
     """既知平文を暗号化し、プラグボードを含む全設定を復元できるか確認。"""
     print('=' * 60)
     print('  セルフテスト: プラグボード未知からの完全解読')
     print(f'  モード: {MODE_LABELS[mode][0]}')
     print(f'  Rust/Rayon: {"有効" if HAS_RUST else "無効（純Python）"}')
+    if optimizer != DEFAULT_OPTIMIZER:
+        print(f'  Phase C の最適化手法: {optimizer}')
     print('=' * 60)
 
     plaintext = (
@@ -284,7 +378,7 @@ def selftest(mode=DEFAULT_MODE):
 
     t0 = time.time()
     results = attack_plugboard(ct, language='english', mode=mode,
-                               top_results=3, verbose=True)
+                               top_results=3, optimizer=optimizer, verbose=True)
     el = time.time() - t0
 
     print()
@@ -319,7 +413,8 @@ def prompt_mode():
     return by_number.get(choice, DEFAULT_MODE)
 
 
-def run_attack(ciphertext, language='auto', mode=DEFAULT_MODE):
+def run_attack(ciphertext, language='auto', mode=DEFAULT_MODE,
+               optimizer=DEFAULT_OPTIMIZER):
     cleaned = sum(1 for c in ciphertext.upper() if 'A' <= c <= 'Z')
     label, desc = MODE_LABELS[mode]
     print()
@@ -328,9 +423,11 @@ def run_attack(ciphertext, language='auto', mode=DEFAULT_MODE):
     print(f'（{desc} 途中で止めるには Ctrl+C）')
     if not HAS_RUST:
         print('注意: Rust コアが無効なため、目安時間より大幅に遅くなります。')
+    if optimizer != DEFAULT_OPTIMIZER:
+        print(f'Phase C の最適化手法: {optimizer}')
     print('=' * 60)
     results = attack_plugboard(ciphertext, language=language, mode=mode,
-                               top_results=5, verbose=True)
+                               top_results=5, optimizer=optimizer, verbose=True)
     print()
     print('=' * 60)
     print(f'  上位 {len(results)} 候補')
@@ -361,6 +458,9 @@ def main():
     p.add_argument('--thorough', action='store_true',
                    help='徹底モード（--mode thorough と同じ、非常に遅い）')
     p.add_argument('--selftest', action='store_true', help='既知平文で動作確認')
+    p.add_argument('--optimizer', choices=list(OPTIMIZERS), default=DEFAULT_OPTIMIZER,
+                   help=f'Phase C の最適化手法（既定 {DEFAULT_OPTIMIZER}。'
+                        'ga は遺伝的アルゴリズムで、Rust コアが必要）')
     args = p.parse_args()
 
     if args.thorough:
@@ -371,7 +471,7 @@ def main():
         mode = args.mode  # None なら後で対話または既定で決める
 
     if args.selftest:
-        selftest(mode or DEFAULT_MODE)
+        selftest(mode or DEFAULT_MODE, optimizer=args.optimizer)
         return
 
     ciphertext = args.ciphertext
@@ -394,7 +494,7 @@ def main():
         mode = prompt_mode() if interactive else DEFAULT_MODE
 
     language = args.lang or 'auto'
-    run_attack(ciphertext, language=language, mode=mode)
+    run_attack(ciphertext, language=language, mode=mode, optimizer=args.optimizer)
 
 
 if __name__ == '__main__':
