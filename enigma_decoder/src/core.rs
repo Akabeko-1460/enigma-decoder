@@ -895,7 +895,7 @@ pub fn phase2_staged_one(
     t_end: f64,
 ) -> RankedWithPb {
     let params = Phase2Params {
-        max_pairs, n_restarts, sa_steps, t_start, t_end,
+        max_pairs, n_restarts, sa_steps, t_start, t_end, ga: GaParams::default(),
     };
     phase2_optimize_one(ct, index, rotors, pos, reflector_idx, models,
                         PlugboardOptimizer::Current, &params, 0, &EvalBudget::unlimited())
@@ -914,6 +914,8 @@ pub enum PlugboardOptimizer {
     HillClimb,
     /// SA ＋ 貪欲 HC 磨きを、予算が尽きるまで空の plugboard から再スタートする。
     Annealing,
+    /// 遺伝的アルゴリズム（`ga_plugboard`）。
+    Genetic,
 }
 
 impl PlugboardOptimizer {
@@ -922,6 +924,7 @@ impl PlugboardOptimizer {
             "current" => Some(Self::Current),
             "hc" => Some(Self::HillClimb),
             "sa" => Some(Self::Annealing),
+            "ga" => Some(Self::Genetic),
             _ => None,
         }
     }
@@ -937,6 +940,7 @@ pub struct Phase2Params {
     pub sa_steps: usize,
     pub t_start: f64,
     pub t_end: f64,
+    pub ga: GaParams,
 }
 
 /// 1 候補のプラグボードを指定の手法で復元する。
@@ -967,6 +971,9 @@ pub fn phase2_optimize_one(
             hc_until_budget(ct, &core, pos, rings, models, params.max_pairs, base_seed, budget),
         PlugboardOptimizer::Annealing =>
             sa_until_budget(ct, &core, pos, rings, models, params, base_seed, budget),
+        PlugboardOptimizer::Genetic =>
+            ga_plugboard(ct, &core, pos, rings, models, params.max_pairs, &params.ga,
+                         base_seed ^ 0x6A6A, budget),
     };
     (best_score, rotors, pos, best_pb)
 }
@@ -1059,6 +1066,229 @@ fn sa_until_budget(
         if s > best_score { best_score = s; best_pb = pb; }
         restart += 1;
     }
+    (best_pb, best_score)
+}
+
+// ------------------------------------------------------------------
+// Genetic algorithm（オプトイン）
+// ------------------------------------------------------------------
+
+/// 遺伝的アルゴリズムのパラメータ。既定値は調整用ケースで決めた
+/// （`tools/benchmark_optimizers.py --set tune`）。
+#[derive(Clone, Copy, Debug)]
+pub struct GaParams {
+    /// 個体数。
+    pub pop_size: usize,
+    /// 無条件で次世代に残す上位個体の数（エリート保存）。
+    pub elite: usize,
+    /// トーナメント選択で比べる個体の数。
+    pub tournament: usize,
+    /// 子を交叉で作る確率。外れたら親の複製に突然変異だけを掛ける。
+    pub crossover_rate: f64,
+    /// 突然変異の手を 1 手ずつ追加していく確率（手数は幾何分布）。
+    pub mutation_rate: f64,
+    /// 適応度を IC → bigram → trigram と段階的に切り替えるか。
+    pub staged: bool,
+    /// 予算のうち、最後に最良個体を貪欲 HC で磨くために残す割合。
+    pub polish_frac: f64,
+}
+
+impl Default for GaParams {
+    fn default() -> Self {
+        Self {
+            pop_size: 64,
+            elite: 2,
+            tournament: 3,
+            crossover_rate: 0.9,
+            mutation_rate: 0.5,
+            staged: true,
+            polish_frac: 0.05,
+        }
+    }
+}
+
+/// k ペア（k は 0〜max_pairs の一様乱数）を無作為に繋いだ plugboard。
+fn random_pb<R: Rng>(rng: &mut R, max_pairs: usize) -> [u8; 26] {
+    let mut pb = identity_pb();
+    let mut letters: Vec<u8> = (0u8..26).collect();
+    letters.shuffle(rng);
+    let n_pairs = rng.gen_range(0..=max_pairs.min(13));
+    for k in 0..n_pairs {
+        let (a, b) = (letters[2 * k], letters[2 * k + 1]);
+        pb[a as usize] = b;
+        pb[b as usize] = a;
+    }
+    pb
+}
+
+/// ペア単位の一様交叉。両親に共通するペアは必ず受け継ぎ、残りは両親の
+/// ペアから無作為な順に、文字が衝突しないものを足していく。
+/// 子のペア数は両親のペア数の間で無作為に決める。
+fn crossover_pairs<R: Rng>(rng: &mut R, p1: &[u8; 26], p2: &[u8; 26],
+                           max_pairs: usize) -> [u8; 26] {
+    let mut child = identity_pb();
+    let mut n_pairs = 0usize;
+    let mut rest: Vec<(u8, u8)> = Vec::new();
+    for a in 0u8..26 {
+        let b1 = p1[a as usize];
+        let b2 = p2[a as usize];
+        if b1 > a && b1 == b2 {
+            child[a as usize] = b1;
+            child[b1 as usize] = a;
+            n_pairs += 1;
+            continue;
+        }
+        if b1 > a { rest.push((a, b1)); }
+        if b2 > a { rest.push((a, b2)); }
+    }
+    rest.shuffle(rng);
+
+    let (n1, n2) = (count_pairs(p1), count_pairs(p2));
+    let target = rng.gen_range(n1.min(n2)..=n1.max(n2)).min(max_pairs);
+    for (a, b) in rest {
+        if n_pairs >= target { break; }
+        if child[a as usize] == a && child[b as usize] == b {
+            child[a as usize] = b;
+            child[b as usize] = a;
+            n_pairs += 1;
+        }
+    }
+    child
+}
+
+/// `propose_move` の手を 1 つ掛ける。成立する手が出るまで数回引き直す。
+fn mutate_once<R: Rng>(rng: &mut R, pb: &mut [u8; 26], max_pairs: usize) {
+    for _ in 0..8 {
+        if let Some(trial) = propose_move(rng, pb, max_pairs) {
+            *pb = trial;
+            return;
+        }
+    }
+}
+
+/// 適応度の降順に並んだ集団から、トーナメント選択で 1 個体の添字を選ぶ。
+/// 並び済みなので、引いた添字の最小値が最良個体になる。
+fn tournament_index<R: Rng>(rng: &mut R, pop_len: usize, size: usize) -> usize {
+    (0..size.max(1)).map(|_| rng.gen_range(0..pop_len)).min().unwrap_or(0)
+}
+
+fn sort_by_fitness_desc(pop: &mut [([u8; 26], f64)]) {
+    pop.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+}
+
+/// 選択・交叉・突然変異で子を 1 つ作る（評価はしない）。
+fn breed_child<R: Rng>(rng: &mut R, pop: &[([u8; 26], f64)], params: &GaParams,
+                       max_pairs: usize) -> [u8; 26] {
+    let p1 = pop[tournament_index(rng, pop.len(), params.tournament)].0;
+    let p2 = pop[tournament_index(rng, pop.len(), params.tournament)].0;
+    let mut child = if rng.gen::<f64>() < params.crossover_rate {
+        crossover_pairs(rng, &p1, &p2, max_pairs)
+    } else {
+        p1
+    };
+    while rng.gen::<f64>() < params.mutation_rate {
+        mutate_once(rng, &mut child, max_pairs);
+    }
+    // 親の複製は評価の無駄なので、必ず 1 手は動かす
+    if child == p1 || child == p2 {
+        mutate_once(rng, &mut child, max_pairs);
+    }
+    child
+}
+
+/// 同じ適応度関数のあいだ、`stage` の予算が尽きるまで世代交代を回す。
+/// 最初に集団を評価し直す（直前の段階とは適応度関数が違うため）。
+/// `pop` は適応度の降順に並んだ状態で返る。
+fn evolve_stage<R: Rng, E: FnMut(&[u8; 26]) -> f64>(
+    rng: &mut R,
+    pop: &mut Vec<([u8; 26], f64)>,
+    params: &GaParams,
+    max_pairs: usize,
+    stage: &EvalBudget,
+    evaluate: &mut E,
+) {
+    let pop_size = pop.len();
+    let elite = params.elite.min(pop_size - 1);
+
+    for ind in pop.iter_mut() {
+        ind.1 = evaluate(&ind.0);
+    }
+    sort_by_fitness_desc(pop);
+
+    while !stage.exhausted() {
+        let mut next: Vec<([u8; 26], f64)> = pop[..elite].to_vec();
+        while next.len() < pop_size && !stage.exhausted() {
+            let child = breed_child(rng, pop, params, max_pairs);
+            next.push((child, evaluate(&child)));
+        }
+        // 予算切れで世代が埋まらなかったら、前世代の上位で補う
+        let shortfall = pop_size - next.len();
+        next.extend_from_slice(&pop[elite..elite + shortfall]);
+        *pop = next;
+        sort_by_fitness_desc(pop);
+    }
+}
+
+/// 遺伝的アルゴリズムによるプラグボード復元。
+///
+/// - 個体: plugboard（26 文字の対合。ペア数は max_pairs 以下）
+/// - 初期集団: 空の plugboard 1 個 + ランダムな plugboard
+/// - 選択: トーナメント選択 / エリート保存: 上位 `elite` 個体をそのまま残す
+/// - 交叉: `crossover_pairs`（共通ペアを保存するペア単位の一様交叉）
+/// - 突然変異: SA と同じ 3 種類の手（`propose_move`）
+/// - 適応度: `staged` なら現行 HC と同じく IC → bigram → trigram に段階的に
+///   切り替える（予算を 3 等分。切り替え時に集団を再評価する）
+///
+/// 予算の `polish_frac` を残して世代交代を回し、残りで最良個体を
+/// trigram の貪欲 HC で磨く。返すスコアは trigram+quadgram（全手法共通）。
+pub fn ga_plugboard(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    models: &StagedModels,
+    max_pairs: usize,
+    params: &GaParams,
+    seed: u64,
+    budget: &EvalBudget,
+) -> ([u8; 26], f64) {
+    let mut rng = SmallRng::seed_from_u64(seed);
+    let ic_fit = |t: &[u8]| score_phase1(t);
+    let bigram_fit = |t: &[u8]| models.bigram_fit(t);
+    let trigram_fit = |t: &[u8]| models.trigram_fit(t);
+    let stages: Vec<&dyn Fn(&[u8]) -> f64> = if params.staged {
+        vec![&ic_fit, &bigram_fit, &trigram_fit]
+    } else {
+        vec![&trigram_fit]
+    };
+
+    let mut pop: Vec<([u8; 26], f64)> = (0..params.pop_size.max(2))
+        .map(|i| if i == 0 { identity_pb() } else { random_pb(&mut rng, max_pairs) })
+        .map(|pb| (pb, f64::NEG_INFINITY))
+        .collect();
+
+    let mut out = Vec::with_capacity(ct.len());
+    let ga_total = (budget.remaining() as f64 * (1.0 - params.polish_frac)) as u64;
+    let n_stages = stages.len() as u64;
+
+    for (k, fit) in stages.iter().enumerate() {
+        let k = k as u64;
+        let stage = EvalBudget::new(ga_total * (k + 1) / n_stages - ga_total * k / n_stages);
+        let mut evaluate = |pb: &[u8; 26]| {
+            core.decrypt(ct, rings, pos, pb, &mut out);
+            stage.try_eval(fit, &out)
+        };
+        evolve_stage(&mut rng, &mut pop, params, max_pairs, &stage, &mut evaluate);
+        budget.absorb(&stage);
+    }
+
+    let mut best_pb = pop[0].0;
+    if params.polish_frac > 0.0 {
+        let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| budget.try_eval(&trigram_fit, t),
+                                 max_pairs, best_pb, None);
+        best_pb = pb;
+    }
+    let best_score = score_pb(ct, core, pos, rings, &best_pb, &trigram_fit, budget);
     (best_pb, best_score)
 }
 
