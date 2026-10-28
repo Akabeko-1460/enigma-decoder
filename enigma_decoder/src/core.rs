@@ -894,34 +894,172 @@ pub fn phase2_staged_one(
     t_start: f64,
     t_end: f64,
 ) -> RankedWithPb {
-    let core = EnigmaCore::new(rotors, reflector_idx);
-    let base_seed = (index as u64).wrapping_mul(SEED_STRIDE);
+    let params = Phase2Params {
+        max_pairs, n_restarts, sa_steps, t_start, t_end,
+    };
+    phase2_optimize_one(ct, index, rotors, pos, reflector_idx, models,
+                        PlugboardOptimizer::Current, &params, 0, &EvalBudget::unlimited())
+}
 
-    // multi-start staged climb: empty plugboard + n_restarts random starts
+// ------------------------------------------------------------------
+// Phase C の最適化手法の切り替え（手法比較・GA のオプトイン用）
+// ------------------------------------------------------------------
+
+/// Phase C（プラグボード復元）の最適化手法。既定は `Current`。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlugboardOptimizer {
+    /// 現行: 段階スコア HC のマルチスタート ＋ SA 磨き上げ。
+    Current,
+    /// 段階スコア HC だけを、予算が尽きるまでランダム初期値から再スタートする。
+    HillClimb,
+    /// SA ＋ 貪欲 HC 磨きを、予算が尽きるまで空の plugboard から再スタートする。
+    Annealing,
+}
+
+impl PlugboardOptimizer {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "current" => Some(Self::Current),
+            "hc" => Some(Self::HillClimb),
+            "sa" => Some(Self::Annealing),
+            _ => None,
+        }
+    }
+}
+
+/// Phase C の探索パラメータ一式。
+#[derive(Clone, Copy, Debug)]
+pub struct Phase2Params {
+    pub max_pairs: usize,
+    /// Current: ランダム初期値からの再スタート回数。
+    pub n_restarts: usize,
+    /// Current: 磨き上げの SA ステップ数 / Annealing: 1 回の SA のステップ数。
+    pub sa_steps: usize,
+    pub t_start: f64,
+    pub t_end: f64,
+}
+
+/// 1 候補のプラグボードを指定の手法で復元する。
+///
+/// `index` は候補の通し番号、`run_seed` は試行ごとの乱数シード
+/// （既定の解読経路は 0）。どちらも乱数列の分岐に使う。
+/// Current 以外は予算が尽きるまで探索を続けるので、有限の `budget` が要る。
+pub fn phase2_optimize_one(
+    ct: &[u8],
+    index: usize,
+    rotors: [usize; 3],
+    pos: [u8; 3],
+    reflector_idx: usize,
+    models: &StagedModels,
+    method: PlugboardOptimizer,
+    params: &Phase2Params,
+    run_seed: u64,
+    budget: &EvalBudget,
+) -> RankedWithPb {
+    let core = EnigmaCore::new(rotors, reflector_idx);
+    let base_seed = (index as u64).wrapping_mul(SEED_STRIDE) ^ run_seed;
+    let rings = [0, 0, 0];
+
+    let (best_pb, best_score) = match method {
+        PlugboardOptimizer::Current =>
+            current_search(ct, &core, pos, rings, models, params, base_seed, budget),
+        PlugboardOptimizer::HillClimb =>
+            hc_until_budget(ct, &core, pos, rings, models, params.max_pairs, base_seed, budget),
+        PlugboardOptimizer::Annealing =>
+            sa_until_budget(ct, &core, pos, rings, models, params, base_seed, budget),
+    };
+    (best_score, rotors, pos, best_pb)
+}
+
+/// 現行の Phase C: 段階スコア HC（空 + n_restarts 個のランダム初期値）の最良解を
+/// trigram の SA で磨く。予算が無制限なら既存の `phase2_staged_one` と同一の結果。
+fn current_search(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    models: &StagedModels,
+    params: &Phase2Params,
+    base_seed: u64,
+    budget: &EvalBudget,
+) -> ([u8; 26], f64) {
+    let max_pairs = params.max_pairs;
     let (mut best_pb, mut best_score) =
-        staged_climb(ct, &core, pos, [0, 0, 0], models, max_pairs, identity_pb());
+        staged_climb_budgeted(ct, core, pos, rings, models, max_pairs, identity_pb(), budget);
 
     let mut rng = SmallRng::seed_from_u64(base_seed ^ 0xABCDEF);
-    for _ in 0..n_restarts {
+    for _ in 0..params.n_restarts {
         let init = random_initial_pb(&mut rng, max_pairs);
-        let (pb, s) = staged_climb(ct, &core, pos, [0, 0, 0], models, max_pairs, init);
+        let (pb, s) = staged_climb_budgeted(ct, core, pos, rings, models, max_pairs, init, budget);
         if s > best_score { best_score = s; best_pb = pb; }
     }
 
-    // SA polish on the trigram scorer, seeded from the best staged pb
-    if sa_steps > 0 {
+    if params.sa_steps > 0 {
         let sc = if models.use_en { models.en_sc } else { models.ja_sc };
-        let (pb_sa, _) = sa_plugboard(ct, &core, pos, [0, 0, 0], sc, max_pairs,
-                                      sa_steps, t_start, t_end, best_pb,
-                                      base_seed ^ 0x1234);
+        let (pb_sa, _) = sa_budgeted(ct, core, pos, rings, &|t: &[u8]| sc.score(t), max_pairs,
+                                     params.sa_steps, params.t_start, params.t_end, best_pb,
+                                     base_seed ^ 0x1234, budget);
         // re-score under the max-language trigram fitness for fairness
-        let mut out = Vec::with_capacity(ct.len());
-        core.decrypt(ct, [0, 0, 0], pos, &pb_sa, &mut out);
-        let s_final = models.trigram_fit(&out);
+        let s_final = score_pb(ct, core, pos, rings, &pb_sa,
+                               &|t: &[u8]| models.trigram_fit(t), budget);
         if s_final > best_score { best_score = s_final; best_pb = pb_sa; }
     }
 
-    (best_score, rotors, pos, best_pb)
+    (best_pb, best_score)
+}
+
+/// HC 単独: 段階スコア HC を空の plugboard から 1 回、以降はランダム初期値から
+/// 予算が尽きるまで繰り返す（現行から SA を外し、その分を再スタートに回した形）。
+fn hc_until_budget(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    models: &StagedModels,
+    max_pairs: usize,
+    base_seed: u64,
+    budget: &EvalBudget,
+) -> ([u8; 26], f64) {
+    let (mut best_pb, mut best_score) =
+        staged_climb_budgeted(ct, core, pos, rings, models, max_pairs, identity_pb(), budget);
+
+    let mut rng = SmallRng::seed_from_u64(base_seed ^ 0xABCDEF);
+    while !budget.exhausted() {
+        let init = random_initial_pb(&mut rng, max_pairs);
+        let (pb, s) = staged_climb_budgeted(ct, core, pos, rings, models, max_pairs, init, budget);
+        if s > best_score { best_score = s; best_pb = pb; }
+    }
+    (best_pb, best_score)
+}
+
+/// SA 単独: 空の plugboard からの SA（trigram+quadgram）＋貪欲 HC 磨きを、
+/// 予算が尽きるまで再スタートする（既存の Tier-2 SA `phase2_sa` と同じ形）。
+fn sa_until_budget(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    models: &StagedModels,
+    params: &Phase2Params,
+    base_seed: u64,
+    budget: &EvalBudget,
+) -> ([u8; 26], f64) {
+    let fit = |t: &[u8]| models.trigram_fit(t);
+    let mut best_pb = identity_pb();
+    let mut best_score = f64::NEG_INFINITY;
+
+    let mut restart = 0u64;
+    while !budget.exhausted() {
+        let seed = (base_seed ^ 0x1234).wrapping_add(restart);
+        let (pb, _) = sa_budgeted(ct, core, pos, rings, &fit, params.max_pairs, params.sa_steps,
+                                  params.t_start, params.t_end, identity_pb(), seed, budget);
+        let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| budget.try_eval(&fit, t),
+                                 params.max_pairs, pb, None);
+        let s = score_pb(ct, core, pos, rings, &pb, &fit, budget);
+        if s > best_score { best_score = s; best_pb = pb; }
+        restart += 1;
+    }
+    (best_pb, best_score)
 }
 
 /// スコア降順に並べ替えて上位 n 件に切り詰める。NaN は同順として扱う。

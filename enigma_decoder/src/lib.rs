@@ -380,8 +380,100 @@ mod python_bindings {
         Ok(results)
     }
 
+    /// Phase C を手法を選んで実行する（手法比較用）。
+    ///
+    /// method: "current"（既定の段階スコア HC＋SA）/ "hc" / "sa"
+    /// budgets: 候補ごとの適応度評価の上限。None なら無制限（"current" のみ可）。
+    /// 戻り値の最後の要素は、その候補で実際に使った評価回数。
+    #[pyfunction]
+    #[pyo3(signature = (
+        ct, candidates, reflector_idx, use_en, use_ja,
+        en_bi, en_bi_floor, ja_bi, ja_bi_floor,
+        en_tri, en_tri_floor, en_quad, en_quad_floor,
+        ja_tri, ja_tri_floor, ja_quad, ja_quad_floor,
+        max_pairs, method, budgets=None, run_seed=0,
+        n_restarts=4, sa_steps=40000, t_start=12.0, t_end=0.3,
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn phase2_optimize(
+        ct: Vec<u8>,
+        candidates: Vec<([usize; 3], [u8; 3])>,
+        reflector_idx: usize,
+        use_en: bool,
+        use_ja: bool,
+        en_bi: Vec<f64>,
+        en_bi_floor: f64,
+        ja_bi: Vec<f64>,
+        ja_bi_floor: f64,
+        en_tri: Vec<f64>,
+        en_tri_floor: f64,
+        en_quad: Vec<f64>,
+        en_quad_floor: f64,
+        ja_tri: Vec<f64>,
+        ja_tri_floor: f64,
+        ja_quad: Vec<f64>,
+        ja_quad_floor: f64,
+        max_pairs: usize,
+        method: &str,
+        budgets: Option<Vec<u64>>,
+        run_seed: u64,
+        n_restarts: usize,
+        sa_steps: usize,
+        t_start: f64,
+        t_end: f64,
+    ) -> PyResult<Vec<(f64, [usize; 3], [u8; 3], [u8; 26], u64)>> {
+        use pyo3::exceptions::PyValueError;
+
+        let optimizer = PlugboardOptimizer::from_name(method).ok_or_else(|| {
+            PyValueError::new_err(format!("unknown method: {method} (current/hc/sa)"))
+        })?;
+        match &budgets {
+            None if optimizer != PlugboardOptimizer::Current => {
+                return Err(PyValueError::new_err(
+                    format!("method {method} needs per-candidate budgets")));
+            }
+            Some(b) if b.len() != candidates.len() => {
+                return Err(PyValueError::new_err(
+                    "budgets must have one entry per candidate"));
+            }
+            _ => {}
+        }
+        if max_pairs < 3 {
+            return Err(PyValueError::new_err("max_pairs must be at least 3"));
+        }
+
+        let params = Phase2Params { max_pairs, n_restarts, sa_steps, t_start, t_end };
+
+        let ngrams = NgramArgs { en_tri, en_tri_floor, en_quad, en_quad_floor,
+                                 ja_tri, ja_tri_floor, ja_quad, ja_quad_floor };
+        let (en_sc, ja_sc) = ngrams.scorers();
+        let models = StagedModels {
+            use_en, use_ja,
+            en_bi: &en_bi, en_bi_floor,
+            ja_bi: &ja_bi, ja_bi_floor,
+            en_sc: &en_sc, ja_sc: &ja_sc,
+        };
+
+        let results = candidates
+            .par_iter()
+            .enumerate()
+            .map(|(cand_i, &(rotors, pos))| {
+                let budget = match &budgets {
+                    Some(b) => EvalBudget::new(b[cand_i]),
+                    None => EvalBudget::unlimited(),
+                };
+                let (score, rotors, pos, pb) = phase2_optimize_one(
+                    &ct, cand_i, rotors, pos, reflector_idx, &models,
+                    optimizer, &params, run_seed, &budget);
+                (score, rotors, pos, pb, budget.used())
+            })
+            .collect();
+        Ok(results)
+    }
+
     #[pymodule]
     fn enigma_decoder(m: &Bound<'_, pyo3::types::PyModule>) -> PyResult<()> {
+        m.add_function(wrap_pyfunction!(phase2_optimize, m)?)?;
         m.add_function(wrap_pyfunction!(phase1, m)?)?;
         m.add_function(wrap_pyfunction!(phase1_known_pb, m)?)?;
         m.add_function(wrap_pyfunction!(phase2_staged, m)?)?;
