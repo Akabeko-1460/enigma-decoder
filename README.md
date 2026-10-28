@@ -19,7 +19,8 @@ enigma_breaker/
 ├── ngrams_en.txt.gz             # 大規模コーパス由来の n-gram 頻度表（gzip 224KB）
 ├── enigma_decoder/              # Rust 解析コア（ネイティブ=PyO3+Rayon / ブラウザ=WASM）
 ├── web/                         # Next.js Web アプリ（生成機・復号機・解読機）
-├── tools/                       # Web 用データ生成・検証用の基準値生成
+├── tools/                       # Web 用データ生成・検証用の基準値生成・最適化手法の比較
+├── docs/                        # 最適化手法（HC・SA・GA）の比較記録
 └── README.md                    # このファイル
 ```
 
@@ -146,6 +147,21 @@ Phase D  最終検証              … n-gram＋単語リスト照合で候補�
 
 中程度長×多プラグの難条件で段階スコアが優位。50〜65字の極短文は情報理論的限界に
 近く、本手法でも余分なプラグを過学習することがある（どのアルゴリズムでも同じ壁）。
+
+### 最適化手法の比較（遺伝的アルゴリズムを含む）
+
+Phase C の探索手法として**遺伝的アルゴリズム（GA）**も実装し、山登り法（HC）・焼きなまし法（SA）・
+現行の組み合わせと、**同じ適応度評価回数・同じ乱数シード・同じ層（Rust）**で比べた。
+結果は GA が現行を下回った（正解の候補を与えたときの完全復元: 17/50 対 21/50、12/50 対 18/50）
+ため、既定は現行のまま。条件・全結果・考察は
+[`docs/optimizer-comparison.md`](docs/optimizer-comparison.md)、再現用スクリプトは
+[`tools/benchmark_optimizers.py`](tools/benchmark_optimizers.py)。
+
+GA はオプトインで試せる（Rust コアの再ビルドが必要）:
+
+```bash
+python decrypt_plugboard.py --optimizer ga <暗号文>   # 既定は --optimizer staged（現行）
+```
 
 ---
 
