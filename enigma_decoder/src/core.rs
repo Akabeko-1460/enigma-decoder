@@ -4,8 +4,11 @@
 //! 「1 ローター順を処理する」「1 候補を処理する」単位の関数を公開する。
 //! ネイティブ版は Rayon で、ブラウザ版は Web Worker プールでこれらを束ねる。
 
+use std::cell::Cell;
+
+use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 
 pub const ROTORS: [&str; 5] = [
     "EKMFLGDQVZNTOWYHXUSPAIBRCJ", // I
@@ -268,6 +271,132 @@ fn apply_remove(pb: &[u8; 26], a: u8) -> [u8; 26] {
     trial
 }
 
+/// 繋がっているペアの小さい方の文字を昇順に並べる。
+#[inline]
+fn pair_heads(pb: &[u8; 26]) -> Vec<u8> {
+    (0u8..26).filter(|&i| pb[i as usize] > i).collect()
+}
+
+/// SA の近傍と GA の突然変異で共用する、ランダムな 1 手。
+///
+/// 手の種類（確率）:
+///   1. ADD/SWAP 60%     — ランダムな a↔b を繋ぐ（既存の相手は切る）
+///   2. REMOVE 15%       — 既存ペアを 1 本切る
+///   3. PARTNER-SWAP 25% — 既存ペア a↔b, c↔d を a↔c, b↔d（または a↔d, b↔c）に組み替える
+///
+/// PARTNER-SWAP は多ペア時の局所最適からの脱出に効く。貪欲 HC では
+/// 「相手の同時交換」でしか到達できない状態に届かないため。
+///
+/// 手が成立しない（ペア数の上限超過など）ときは None。乱数の消費順は
+/// 切り出し前の `sa_plugboard` と同一に保ってある（結果を変えないため）。
+fn propose_move<R: Rng>(rng: &mut R, pb: &[u8; 26], max_pairs: usize) -> Option<[u8; 26]> {
+    let mv = rng.gen_range(0..100);
+
+    if mv < 60 {
+        let a = rng.gen_range(0u8..26);
+        let mut b = rng.gen_range(0u8..26);
+        while b == a { b = rng.gen_range(0u8..26); }
+        let trial = apply_set(pb, a, b)?;
+        return if count_pairs(&trial) > max_pairs { None } else { Some(trial) };
+    }
+
+    let existing = pair_heads(pb);
+    if mv < 75 {
+        if existing.is_empty() { return None; }
+        let idx = rng.gen_range(0..existing.len());
+        return Some(apply_remove(pb, existing[idx]));
+    }
+
+    if existing.len() < 2 { return None; }
+    let i = rng.gen_range(0..existing.len());
+    let mut j = rng.gen_range(0..existing.len());
+    while j == i { j = rng.gen_range(0..existing.len()); }
+    let a = existing[i];
+    let b = pb[a as usize];
+    let c = existing[j];
+    let d = pb[c as usize];
+    let mut trial = *pb;
+    if rng.gen::<bool>() {
+        trial[a as usize] = c; trial[c as usize] = a;
+        trial[b as usize] = d; trial[d as usize] = b;
+    } else {
+        trial[a as usize] = d; trial[d as usize] = a;
+        trial[b as usize] = c; trial[c as usize] = b;
+    }
+    Some(trial)
+}
+
+// ------------------------------------------------------------------
+// 適応度評価の回数（手法比較の予算）
+// ------------------------------------------------------------------
+
+/// 適応度評価（＝1 回の復号＋採点）の回数を数え、上限に達したら打ち切らせる。
+///
+/// 手法比較で「評価回数」をそろえるためのもの。既定の解読経路は
+/// `unlimited()` を渡すので、数えるだけで探索結果は変わらない。
+pub struct EvalBudget {
+    used: Cell<u64>,
+    limit: u64,
+}
+
+impl EvalBudget {
+    pub fn new(limit: u64) -> Self {
+        Self { used: Cell::new(0), limit }
+    }
+
+    pub fn unlimited() -> Self {
+        Self::new(u64::MAX)
+    }
+
+    pub fn used(&self) -> u64 {
+        self.used.get()
+    }
+
+    pub fn remaining(&self) -> u64 {
+        self.limit.saturating_sub(self.used.get())
+    }
+
+    pub fn exhausted(&self) -> bool {
+        self.used.get() >= self.limit
+    }
+
+    /// 予算が残っていれば 1 回分を数えて `fit(text)` を返す。尽きていれば -∞。
+    /// -∞ はどの探索でも「改善しない手」として扱われるので、探索が自然に止まる。
+    #[inline]
+    pub fn try_eval<F: Fn(&[u8]) -> f64>(&self, fit: &F, text: &[u8]) -> f64 {
+        if self.exhausted() { return f64::NEG_INFINITY; }
+        self.eval(fit, text)
+    }
+
+    /// 予算に関係なく 1 回分を数えて評価する。探索の結果を記録するための
+    /// 最終採点に使う（尽きていても結果のスコアは要るため）。
+    #[inline]
+    pub fn eval<F: Fn(&[u8]) -> f64>(&self, fit: &F, text: &[u8]) -> f64 {
+        self.used.set(self.used.get() + 1);
+        fit(text)
+    }
+
+    /// 下位の予算で使った回数をこちらに合算する。
+    pub fn absorb(&self, sub: &EvalBudget) {
+        self.used.set(self.used.get() + sub.used());
+    }
+}
+
+/// `pb` で復号した文を、予算に数えたうえで採点する。
+fn score_pb<F: Fn(&[u8]) -> f64>(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    pb: &[u8; 26],
+    fit: &F,
+    budget: &EvalBudget,
+) -> f64 {
+    let mut out = Vec::with_capacity(ct.len());
+    core.decrypt(ct, rings, pos, pb, &mut out);
+    budget.eval(fit, &out)
+}
+
 // ------------------------------------------------------------------
 // Hill climbing
 // ------------------------------------------------------------------
@@ -473,19 +602,36 @@ pub fn staged_climb(
     max_pairs: usize,
     initial_pb: [u8; 26],
 ) -> ([u8; 26], f64) {
+    staged_climb_budgeted(ct, core, pos, rings, models, max_pairs, initial_pb,
+                          &EvalBudget::unlimited())
+}
+
+/// `staged_climb` の評価回数を数える版。予算が尽きた時点で山登りを止める。
+pub fn staged_climb_budgeted(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    models: &StagedModels,
+    max_pairs: usize,
+    initial_pb: [u8; 26],
+    budget: &EvalBudget,
+) -> ([u8; 26], f64) {
+    let ic_fit = |t: &[u8]| score_phase1(t);
+    let bigram_fit = |t: &[u8]| models.bigram_fit(t);
+    let trigram_fit = |t: &[u8]| models.trigram_fit(t);
+
     // pass 1: IC + bigram-IC (language-agnostic, plugboard-robust)
-    let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| score_phase1(t),
+    let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| budget.try_eval(&ic_fit, t),
                              max_pairs, initial_pb, None);
     // pass 2: bigram log-weight (max over enabled languages)
-    let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| models.bigram_fit(t),
+    let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| budget.try_eval(&bigram_fit, t),
                              max_pairs, pb, None);
     // pass 3: trigram + quadgram (max over enabled languages)
-    let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| models.trigram_fit(t),
+    let (pb, _) = hc_generic(ct, core, pos, rings, &|t: &[u8]| budget.try_eval(&trigram_fit, t),
                              max_pairs, pb, None);
 
-    let mut out = Vec::with_capacity(ct.len());
-    core.decrypt(ct, rings, pos, &pb, &mut out);
-    let final_score = models.trigram_fit(&out);
+    let final_score = score_pb(ct, core, pos, rings, &pb, &trigram_fit, budget);
     (pb, final_score)
 }
 
@@ -495,14 +641,8 @@ pub fn staged_climb(
 
 /// Simulated Annealing for plugboard optimization.
 ///
-/// Three move types per step (random choice):
-///   1. ADD/SWAP   — connect random a↔b (disconnects their existing partners)
-///   2. REMOVE     — disconnect an existing pair
-///   3. PARTNER-SWAP — given two existing pairs a↔b and c↔d, reform as a↔c, b↔d
-///
-/// PARTNER-SWAP is critical for escaping local optima when many pairs are
-/// present — greedy HC cannot reach states reachable only via simultaneous
-/// partner exchange.
+/// 1 ステップごとに `propose_move` の 3 種類の手（ADD/SWAP・REMOVE・
+/// PARTNER-SWAP）から 1 つを試す。
 pub fn sa_plugboard(
     ct: &[u8],
     core: &EnigmaCore,
@@ -516,15 +656,32 @@ pub fn sa_plugboard(
     initial_pb: [u8; 26],
     seed: u64,
 ) -> ([u8; 26], f64) {
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
+    sa_budgeted(ct, core, pos, rings, &|t: &[u8]| scorer.score(t), max_pairs,
+                n_steps, t_start, t_end, initial_pb, seed, &EvalBudget::unlimited())
+}
 
+/// `sa_plugboard` の適応度関数を差し替えられ、評価回数を数える版。
+/// 予算が尽きたら冷却の途中でも止め、それまでの最良解を返す。
+pub fn sa_budgeted<F: Fn(&[u8]) -> f64>(
+    ct: &[u8],
+    core: &EnigmaCore,
+    pos: [u8; 3],
+    rings: [u8; 3],
+    fit: &F,
+    max_pairs: usize,
+    n_steps: usize,
+    t_start: f64,
+    t_end: f64,
+    initial_pb: [u8; 26],
+    seed: u64,
+    budget: &EvalBudget,
+) -> ([u8; 26], f64) {
     let mut rng = SmallRng::seed_from_u64(seed);
     let mut pb = initial_pb;
     let mut out = Vec::with_capacity(ct.len());
 
     core.decrypt(ct, rings, pos, &pb, &mut out);
-    let mut cur_score = scorer.score(&out);
+    let mut cur_score = budget.eval(fit, &out);
 
     let mut best_pb = pb;
     let mut best_score = cur_score;
@@ -532,62 +689,16 @@ pub fn sa_plugboard(
     let cooling_ratio = t_end / t_start;
 
     for step in 0..n_steps {
+        if budget.exhausted() { break; }
         let t = t_start * cooling_ratio.powf(step as f64 / n_steps as f64);
 
-        // Pick a move type. Weights: ADD/SWAP 60%, REMOVE 15%, PARTNER 25%.
-        let mv = rng.gen_range(0..100);
-        let mut trial = pb;
-        let mut valid = true;
-
-        if mv < 60 {
-            // ADD/SWAP — pick two random distinct letters and pair them.
-            let a = rng.gen_range(0u8..26);
-            let mut b = rng.gen_range(0u8..26);
-            while b == a { b = rng.gen_range(0u8..26); }
-            match apply_set(&trial, a, b) {
-                None => valid = false,
-                Some(t2) => {
-                    trial = t2;
-                    if count_pairs(&trial) > max_pairs { valid = false; }
-                }
-            }
-        } else if mv < 75 {
-            // REMOVE — pick an existing pair and disconnect it.
-            let existing: Vec<u8> = (0u8..26).filter(|&i| trial[i as usize] > i).collect();
-            if existing.is_empty() {
-                valid = false;
-            } else {
-                let idx = rng.gen_range(0..existing.len());
-                trial = apply_remove(&trial, existing[idx]);
-            }
-        } else {
-            // PARTNER-SWAP — pick two existing pairs (a,b) and (c,d), reform them.
-            let existing: Vec<u8> = (0u8..26).filter(|&i| trial[i as usize] > i).collect();
-            if existing.len() < 2 {
-                valid = false;
-            } else {
-                let i = rng.gen_range(0..existing.len());
-                let mut j = rng.gen_range(0..existing.len());
-                while j == i { j = rng.gen_range(0..existing.len()); }
-                let a = existing[i];
-                let b = trial[a as usize];
-                let c = existing[j];
-                let d = trial[c as usize];
-                // Randomize which way we re-pair (a-c,b-d) vs (a-d,b-c)
-                if rng.gen::<bool>() {
-                    trial[a as usize] = c; trial[c as usize] = a;
-                    trial[b as usize] = d; trial[d as usize] = b;
-                } else {
-                    trial[a as usize] = d; trial[d as usize] = a;
-                    trial[b as usize] = c; trial[c as usize] = b;
-                }
-            }
-        }
-
-        if !valid { continue; }
+        let trial = match propose_move(&mut rng, &pb, max_pairs) {
+            Some(trial) => trial,
+            None => continue,
+        };
 
         core.decrypt(ct, rings, pos, &trial, &mut out);
-        let trial_score = scorer.score(&out);
+        let trial_score = budget.eval(fit, &out);
         let delta = trial_score - cur_score;
 
         let accept = delta > 0.0 || {
@@ -783,9 +894,6 @@ pub fn phase2_staged_one(
     t_start: f64,
     t_end: f64,
 ) -> RankedWithPb {
-    use rand::rngs::SmallRng;
-    use rand::SeedableRng;
-
     let core = EnigmaCore::new(rotors, reflector_idx);
     let base_seed = (index as u64).wrapping_mul(SEED_STRIDE);
 
